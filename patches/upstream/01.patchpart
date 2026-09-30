@@ -1,0 +1,256 @@
+diff -ruN /mnt/data/repo_base/AYUGRAM_IOS_0.7.1.md /mnt/data/repo_mod/AYUGRAM_IOS_0.7.1.md
+--- a/AYUGRAM_IOS_0.7.1.md	1970-01-01 00:00:00.000000000 +0000
++++ b/AYUGRAM_IOS_0.7.1.md	2026-09-30 19:43:54.000000000 +0000
+@@ -0,0 +1,18 @@
++# AyuGram iOS Port 0.7.1
++
++This tree is a best-effort port of selected AyuGram Desktop 7.0.9 features onto Telegram-iOS.
++
++## Included in 0.7.1
++- Ghost Mode core and TelegramCore gating for read receipts, story views, online presence, and upload progress.
++- Pre-delete/pre-edit capture with bounded Postbox-backed AyuGram history.
++- Native AyuGram settings and scoped History screen.
++- Regex filter engine persisted per account, applied before chat history entries are rendered, plus message-context quick-add.
++- AyuGram History entry from a single-message context menu.
++
++## Not an IPA
++Xcode/macOS/iOS SDK signing is required to produce an installable IPA. This environment cannot run Xcode, so this package has not been claimed as a compiled iOS application.
++
++## Important porting notes
++- This is not a byte-for-byte conversion of the Desktop Qt implementation. iOS UI and platform behavior are reimplemented using Telegram-iOS architecture.
++- Desktop-only features such as tray/window handling, updater, and plugin loading are intentionally not copied as-is.
++- Full Xcode compilation still needs to be performed on a Mac with the required Telegram-iOS dependencies, API credentials, and signing setup.
+diff -ruN /mnt/data/repo_base/README.md /mnt/data/repo_mod/README.md
+--- a/README.md	2026-07-17 16:47:37.000000000 +0000
++++ b/README.md	2026-09-30 22:28:53.000000000 +0000
+@@ -114,3 +114,6 @@
+ ```
+ python3 build-system/Make/Make.py --overrideXcodeVersion build ... # Don't check the version of Xcode
+ ```
++
++## AyuGram iOS Port 1.1.0 notes
++This release extends the iOS port with display-only Zalgo/bidi sanitization, media-aware Message Shot rendering, a customizable edited mark, and a translation-provider selector. It is layered on the existing Postbox history, Ghost Mode, and regex-filter integration.
+diff -ruN /mnt/data/repo_base/Telegram/BUILD /mnt/data/repo_mod/Telegram/BUILD
+--- a/Telegram/BUILD	2026-07-17 16:47:37.000000000 +0000
++++ b/Telegram/BUILD	2026-09-30 18:11:48.000000000 +0000
+@@ -371,6 +371,7 @@
+     module_name = "Lib",
+     srcs = glob([
+         "Telegram-iOS/Application.swift",
++        "Telegram-iOS/AyuGramAppIntegration.swift",
+     ]),
+     data = [
+         ":Icons",
+@@ -391,6 +392,7 @@
+     ],
+     deps = [
+         "//submodules/TelegramUI:TelegramUI",
++        "//submodules/AyuGramIOS:AyuGramIOS",
+         "//third-party/boringssl:crypto",
+     ],
+ )
+diff -ruN /mnt/data/repo_base/Telegram/Telegram-iOS/AyuGramAppIntegration.swift /mnt/data/repo_mod/Telegram/Telegram-iOS/AyuGramAppIntegration.swift
+--- a/Telegram/Telegram-iOS/AyuGramAppIntegration.swift	1970-01-01 00:00:00.000000000 +0000
++++ b/Telegram/Telegram-iOS/AyuGramAppIntegration.swift	2026-09-30 23:04:25.000000000 +0000
+@@ -0,0 +1,18 @@
++import Foundation
++import AyuGramIOS
++
++/// App-level integration surface. Telegram account/session code should call
++/// `makeForAccount(accountID:)` when an account becomes active.
++enum AyuGramAppIntegration {
++    static func settings(forAccountID accountID: Int64) -> AyuSettings? {
++        return AyuGramRuntime.settings(accountID: accountID)
++    }
++
++    static func updateSettings(forAccountID accountID: Int64, update: (inout AyuSettings) -> Void) -> Bool {
++        guard let store = try? AyuGramRuntime.cachedSettingsStore(accountID: accountID), (try? store.update(update)) != nil else {
++            return false
++        }
++        return true
++    }
++
++}
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/BUILD /mnt/data/repo_mod/submodules/AyuGramIOS/BUILD
+--- a/submodules/AyuGramIOS/BUILD	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/BUILD	2026-09-30 19:02:47.000000000 +0000
+@@ -0,0 +1,18 @@
++load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
++
++swift_library(
++    name = "AyuGramIOS",
++    module_name = "AyuGramIOS",
++    srcs = glob([
++        "Sources/**/*.swift",
++    ]),
++    copts = [
++        "-warnings-as-errors",
++    ],
++    deps = [
++        "//submodules/Postbox:Postbox",
++    ],
++    visibility = [
++        "//visibility:public",
++    ],
++)
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/PORTING_PROGRESS.md /mnt/data/repo_mod/submodules/AyuGramIOS/PORTING_PROGRESS.md
+--- a/submodules/AyuGramIOS/PORTING_PROGRESS.md	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/PORTING_PROGRESS.md	2026-09-30 22:27:48.000000000 +0000
+@@ -0,0 +1,28 @@
++# AyuGram iOS Port — progress
++
++## 0.1
++Portable AyuGram Swift core: settings, Ghost Mode policy, message history, regex filters and Message Shot models.
++
++## 0.2
++Initial TelegramCore hooks for message deletion/edit capture.
++
++## 0.3
++TelegramCore Ghost Mode hooks for read state, stories, presence, upload progress and message views.
++
++## 0.4
++Expanded Ghost Mode integration and verified clean patch application.
++
++## 0.5
++Added native TelegramUI AyuGram settings/history screens and wired an AyuGram entry into the settings list.
++
++## 0.6
++Moved deleted/edit history persistence into the account Postbox preferences state and changed the History screen to read from Postbox.
++
++## 0.7
++Added persisted regex filters, chat-render filtering, quick-add from message context, and per-dialog history navigation.
++
++## 0.8
++Added typed history filtering, duplicate suppression, history mode selectors, scoped clear-deleted action, and first Message Shot clipboard action.
++
++## 1.1.0
++Added media-aware Message Shot rendering, display-only Zalgo/bidi sanitization, customizable edited mark, translation-provider selector, and completed Build target dependencies for the new rendering hooks.
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/PORT_STATUS.md /mnt/data/repo_mod/submodules/AyuGramIOS/PORT_STATUS.md
+--- a/submodules/AyuGramIOS/PORT_STATUS.md	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/PORT_STATUS.md	2026-09-30 23:08:01.000000000 +0000
+@@ -0,0 +1,34 @@
++# AyuGram iOS Port Status — 1.3.0
++
++## Implemented
++- Per-account AyuGram settings persistence
++- Ghost Mode policy and hooks for read, story-read, presence, upload-progress and message-view paths
++- Deleted-message capture before Postbox deletion
++- Incoming edit-history capture before Postbox replacement
++- Postbox-native AyuGram history state with duplicate suppression and scoped clearing
++- Regex filter engine and chat history filter gate
++- Message Shot context-menu action for text and media-only messages
++- Display-only Zalgo / bidi sanitizer
++- Custom edited mark setting
++- Translation provider selector setting
++- Provider-backed Google/Yandex translation service through Telegram's optional internal translation hook
++- Message bubble tail visibility control
++- Message-shot appearance controls surfaced in AyuGram settings
++
++## Not yet validated in this environment
++- Full Xcode build against a selected iOS SDK
++- Device installation / signing / IPA archive
++- Live network behavior on physical iOS devices
++- Provider rate limits and endpoint availability
++- Full-fidelity media rasterization for Message Shot
++- Visual regression testing across all Telegram bubble layouts
++
++## 1.3.0
++
++- Integrated regex filters into TelegramUI text rendering for incoming messages.
++- Preserves outgoing messages and keeps original Telegram message text untouched.
++- Applies per-dialog rules before shared rules and respects shared-filter exclusions.
++- Restricts chat filtering unless `filtersEnabledInChats` is enabled; broadcast channels remain eligible.
++- Compiles regular expressions once per account/settings snapshot and reuses the engine during message rendering.
++
++- Corrected filter eligibility in chat history: outgoing messages are preserved, and shared filters apply to broadcast channels.
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift /mnt/data/repo_mod/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift
+--- a/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift	2026-09-30 19:02:47.000000000 +0000
+@@ -0,0 +1,42 @@
++import Foundation
++import Postbox
++
++/// Entry points used by TelegramCore just before a message is deleted or
++/// replaced by an edit. The snapshot is created synchronously while the
++/// Postbox transaction still has the original message, while persistence is
++/// performed asynchronously so the Telegram transaction is not blocked.
++public enum AyuGramCaptureService {
++    public static func captureDeleted(transaction: Transaction, messages: [Message], accountID: Int64) {
++        guard !messages.isEmpty else {
++            return
++        }
++        let settingsStore = try? AyuGramRuntime.makeSettingsStore(accountID: accountID)
++        guard settingsStore?.settings.saveDeletedMessages == true else {
++            return
++        }
++
++        let snapshots = messages.map {
++            AyuGramPostboxBridge.snapshot(
++                message: $0,
++                accountID: accountID,
++                isDeleted: true
++            )
++        }
++        _ = AyuGramPostboxHistoryStore.appendDeleted(transaction: transaction, messages: snapshots)
++    }
++
++    public static func captureEdited(transaction: Transaction, message: Message, accountID: Int64, editDate: Int32) {
++        let settingsStore = try? AyuGramRuntime.makeSettingsStore(accountID: accountID)
++        guard settingsStore?.settings.saveMessagesHistory == true else {
++            return
++        }
++
++        let snapshot = AyuGramPostboxBridge.snapshot(
++            message: message,
++            accountID: accountID,
++            isDeleted: false,
++            editDate: editDate
++        )
++        _ = AyuGramPostboxHistoryStore.appendEdited(transaction: transaction, messages: [snapshot])
++    }
++}
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift /mnt/data/repo_mod/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift
+--- a/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift	2026-09-30 23:04:25.000000000 +0000
+@@ -0,0 +1,31 @@
++import Foundation
++import Postbox
++
++/// Adapts Telegram-iOS Postbox.Message to Ayu's portable history model.
++/// This does not mutate Postbox and is intended to run before a message
++/// is removed or replaced by a newer revision.
++public enum AyuGramPostboxBridge {
++    public static func snapshot(
++        message: Message,
++        accountID: Int64,
++        isDeleted: Bool,
++        editDate: Int32 = 0
++    ) -> AyuMessage {
++        let authorID = message.author?.id.toInt64() ?? 0
++        return AyuMessage(
++            fakeID: 0,
++            userID: accountID,
++            dialogID: message.id.peerId.toInt64(),
++            peerID: message.id.peerId.toInt64(),
++            fromID: authorID,
++            topicID: message.threadId ?? 0,
++            messageID: message.id.id,
++            date: message.timestamp,
++            editDate: editDate,
++            text: message.text,
++            mediaPath: nil,
++            mimeType: nil,
++            isDeleted: isDeleted
++        )
++    }
++}
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift /mnt/data/repo_mod/submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift
+--- a/submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift	2026-09-30 20:06:56.000000000 +0000
+@@ -0,0 +1,142 @@
++import Foundation
++import Postbox
++
++/// Postbox-backed storage for AyuGram message history.
++/// The storage is scoped to the current Telegram account because each account
++
