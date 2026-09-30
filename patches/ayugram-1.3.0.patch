@@ -1,0 +1,778 @@
+diff --git a/Telegram/Telegram-iOS/AyuGramAppIntegration.swift b/Telegram/Telegram-iOS/AyuGramAppIntegration.swift
+index 7f14318c..6a42c3ea 100644
+--- a/Telegram/Telegram-iOS/AyuGramAppIntegration.swift
++++ b/Telegram/Telegram-iOS/AyuGramAppIntegration.swift
+@@ -15,14 +15,4 @@ enum AyuGramAppIntegration {
+         return true
+     }
+ 
+-    static func makeForAccount(accountID: Int64) -> (AyuSettingsStore, AyuGramMessageHistoryCoordinator)? {
+-        do {
+-            return (
+-                try AyuGramRuntime.makeSettingsStore(accountID: accountID),
+-                try AyuGramRuntime.makeMessageHistoryCoordinator(accountID: accountID)
+-            )
+-        } catch {
+-            return nil
+-        }
+-    }
+ }
+diff --git a/submodules/AyuGramIOS/PORT_STATUS.md b/submodules/AyuGramIOS/PORT_STATUS.md
+index d52a01a8..091a0112 100644
+--- a/submodules/AyuGramIOS/PORT_STATUS.md
++++ b/submodules/AyuGramIOS/PORT_STATUS.md
+@@ -1,4 +1,4 @@
+-# AyuGram iOS Port Status — 1.1.0
++# AyuGram iOS Port Status — 1.3.0
+ 
+ ## Implemented
+ - Per-account AyuGram settings persistence
+@@ -11,11 +11,24 @@
+ - Display-only Zalgo / bidi sanitizer
+ - Custom edited mark setting
+ - Translation provider selector setting
++- Provider-backed Google/Yandex translation service through Telegram's optional internal translation hook
++- Message bubble tail visibility control
++- Message-shot appearance controls surfaced in AyuGram settings
+ 
+ ## Not yet validated in this environment
+ - Full Xcode build against a selected iOS SDK
+ - Device installation / signing / IPA archive
+ - Live network behavior on physical iOS devices
+-- Provider-backed translation requests
++- Provider rate limits and endpoint availability
+ - Full-fidelity media rasterization for Message Shot
+-- Full bubble renderer geometry controls
++- Visual regression testing across all Telegram bubble layouts
++
++## 1.3.0
++
++- Integrated regex filters into TelegramUI text rendering for incoming messages.
++- Preserves outgoing messages and keeps original Telegram message text untouched.
++- Applies per-dialog rules before shared rules and respects shared-filter exclusions.
++- Restricts chat filtering unless `filtersEnabledInChats` is enabled; broadcast channels remain eligible.
++- Compiles regular expressions once per account/settings snapshot and reuses the engine during message rendering.
++
++- Corrected filter eligibility in chat history: outgoing messages are preserved, and shared filters apply to broadcast channels.
+diff --git a/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift b/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift
+index d64e0d98..b4bb0104 100644
+--- a/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift
++++ b/submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift
+@@ -29,41 +29,3 @@ public enum AyuGramPostboxBridge {
+         )
+     }
+ }
+-
+-public final class AyuGramMessageHistoryCoordinator: @unchecked Sendable {
+-    public let store: MessageHistoryStore
+-
+-    public init(url: URL) throws {
+-        self.store = try MessageHistoryStore(url: url)
+-    }
+-
+-    @discardableResult
+-    public func captureDeleted(
+-        message: Message,
+-        accountID: Int64
+-    ) async throws -> AyuMessage {
+-        try await store.addDeleted(
+-            AyuGramPostboxBridge.snapshot(
+-                message: message,
+-                accountID: accountID,
+-                isDeleted: true
+-            )
+-        )
+-    }
+-
+-    @discardableResult
+-    public func captureEdited(
+-        message: Message,
+-        accountID: Int64,
+-        editDate: Int32
+-    ) async throws -> AyuMessage {
+-        try await store.addEdited(
+-            AyuGramPostboxBridge.snapshot(
+-                message: message,
+-                accountID: accountID,
+-                isDeleted: false,
+-                editDate: editDate
+-            )
+-        )
+-    }
+-}
+diff --git a/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift b/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift
+index 77a13d06..970b68b6 100644
+--- a/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift
++++ b/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift
+@@ -1,10 +1,11 @@
+ import Foundation
+ 
+ public enum AyuGramRuntime {
+-    public static let version = "1.1.0"
++    public static let version = "1.3.0"
+     public static let sourceVersion = "AyuGram Desktop 7.0.9"
+     private static let settingsLock = NSLock()
+     private static var settingsStores: [Int64: AyuSettingsStore] = [:]
++    private static var filterEngineCache: [Int64: (settings: AyuSettings, engine: RegexFilterEngine)] = [:]
+ 
+     /// Returns a shared per-account settings store. Keeping one instance alive is
+     /// important because Ghost Mode is consulted from high-frequency network paths.
+@@ -56,10 +57,36 @@ public enum AyuGramRuntime {
+         return try cachedSettingsStore(accountID: accountID)
+     }
+ 
+-    public static func makeMessageHistoryCoordinator(accountID: Int64) throws -> AyuGramMessageHistoryCoordinator {
+-        let dir = try baseDirectory(accountID: accountID)
+-        return try AyuGramMessageHistoryCoordinator(
+-            url: dir.appendingPathComponent("history.json")
++    public static func shouldFilterMessage(
++        text: String,
++        dialogID: Int64,
++        accountID: Int64,
++        incoming: Bool,
++        isBroadcast: Bool
++    ) -> Bool {
++        guard incoming, !text.isEmpty else { return false }
++        guard let settings = settings(accountID: accountID), settings.filtersEnabled else { return false }
++        guard settings.filtersEnabledInChats || isBroadcast else { return false }
++
++        settingsLock.lock()
++        let engine: RegexFilterEngine
++        if let cached = filterEngineCache[accountID], cached.settings == settings {
++            engine = cached.engine
++        } else {
++            let newEngine = RegexFilterEngine(
++                filters: settings.regexFilters,
++                exclusions: settings.regexFilterExclusions
++            )
++            filterEngineCache[accountID] = (settings, newEngine)
++            engine = newEngine
++        }
++        settingsLock.unlock()
++
++        return engine.isFiltered(
++            text: text,
++            dialogID: dialogID,
++            includeShared: true
+         )
+     }
++
+ }
+diff --git a/submodules/AyuGramIOS/Sources/AyuSettings.swift b/submodules/AyuGramIOS/Sources/AyuSettings.swift
+index d8d8d048..de0d39d6 100644
+--- a/submodules/AyuGramIOS/Sources/AyuSettings.swift
++++ b/submodules/AyuGramIOS/Sources/AyuSettings.swift
+@@ -73,6 +73,7 @@ public struct AyuSettings: Codable, Equatable, Sendable {
+     public var showRepeatMessageInContextMenu: ContextMenuVisibility = .hidden
+     public var showAddFilterInContextMenu: ContextMenuVisibility = .visible
+ 
++    public var messageShot = MessageShotSettings()
+     public var ghostByAccount: [Int64: GhostModeSettings] = [:]
+     public var regexFilters: [RegexFilter] = []
+     public var regexFilterExclusions: Set<RegexFilterExclusion> = []
+diff --git a/submodules/AyuGramIOS/Sources/PortStatus.swift b/submodules/AyuGramIOS/Sources/PortStatus.swift
+index 1b507e2b..eb7f3be9 100644
+--- a/submodules/AyuGramIOS/Sources/PortStatus.swift
++++ b/submodules/AyuGramIOS/Sources/PortStatus.swift
+@@ -8,7 +8,7 @@ public struct AyuIOSPortStatus: Codable, Sendable {
+     public let desktopOnly: [String]
+ 
+     public init() {
+-        self.version = "1.1.0"
++        self.version = "1.3.0"
+         self.sourceVersion = "AyuGram Desktop 7.0.9"
+         self.implemented = [
+             "GhostModeSettings",
+@@ -29,13 +29,14 @@ public struct AyuIOSPortStatus: Codable, Sendable {
+             "Message Shot renderer",
+             "Zalgo/bidi display sanitizer",
+             "Custom edited mark",
+-            "Translation provider selector"
++            "Translation provider selector",
++            "Provider-backed Google/Yandex translation service",
++            "Message bubble tail visibility control",
++            "Message-shot action and appearance controls"
+         ]
+         self.planned = [
+             "Inline deleted/edit markers for restored history",
+-            "Provider-backed translation execution",
+-            "Full message-shot media rendering",
+-            "Appearance bubble renderer controls",
++            "Full Xcode build and device validation",
+             "Remaining AyuGram behaviors"
+         ]
+         self.desktopOnly = [
+diff --git a/submodules/AyuGramIOS/Sources/RegexFilters.swift b/submodules/AyuGramIOS/Sources/RegexFilters.swift
+index 142f4f37..8e01b6f6 100644
+--- a/submodules/AyuGramIOS/Sources/RegexFilters.swift
++++ b/submodules/AyuGramIOS/Sources/RegexFilters.swift
+@@ -36,45 +36,60 @@ public struct RegexFilterExclusion: Codable, Equatable, Hashable, Sendable {
+ }
+ 
+ public final class RegexFilterEngine: @unchecked Sendable {
+-    private var filters: [RegexFilter]
++    private struct CompiledFilter {
++        let filter: RegexFilter
++        let regex: NSRegularExpression?
++    }
++
++    private var filters: [CompiledFilter]
+     private var exclusions: Set<RegexFilterExclusion>
+     private let lock = NSLock()
+ 
+     public init(filters: [RegexFilter] = [], exclusions: Set<RegexFilterExclusion> = []) {
+-        self.filters = filters
++        self.filters = RegexFilterEngine.compile(filters)
+         self.exclusions = exclusions
+     }
+ 
+     public func replace(filters: [RegexFilter], exclusions: Set<RegexFilterExclusion>) {
+         lock.lock(); defer { lock.unlock() }
+-        self.filters = filters
++        self.filters = Self.compile(filters)
+         self.exclusions = exclusions
+     }
+ 
+     /// Mirrors AyuGram's rule: a normal matching rule hides, while a reversed
+     /// rule hides when it does NOT match. Per-dialog rules are checked first.
+     public func isFiltered(text: String, dialogID: Int64, includeShared: Bool = true) -> Bool {
++        guard !text.isEmpty else { return false }
+         lock.lock(); let snapshotFilters = filters; let snapshotExclusions = exclusions; lock.unlock()
+ 
+-        for filter in snapshotFilters where filter.enabled && filter.dialogID == dialogID {
+-            if matches(filter, text: text) { return true }
++        for compiled in snapshotFilters where compiled.filter.enabled && compiled.filter.dialogID == dialogID {
++            if matches(compiled, text: text) { return true }
+         }
+ 
+         guard includeShared else { return false }
+ 
+-        for filter in snapshotFilters where filter.enabled && filter.dialogID == nil {
+-            let excluded = snapshotExclusions.contains(.init(dialogID: dialogID, filterID: filter.id))
++        for compiled in snapshotFilters where compiled.filter.enabled && compiled.filter.dialogID == nil {
++            let excluded = snapshotExclusions.contains(.init(dialogID: dialogID, filterID: compiled.filter.id))
+             guard !excluded else { continue }
+-            if matches(filter, text: text) { return true }
++            if matches(compiled, text: text) { return true }
+         }
+         return false
+     }
+ 
+-    private func matches(_ filter: RegexFilter, text: String) -> Bool {
+-        let options: NSRegularExpression.Options = filter.caseInsensitive ? [.caseInsensitive] : []
+-        guard let regex = try? NSRegularExpression(pattern: filter.text, options: options) else { return false }
++    private static func compile(_ filters: [RegexFilter]) -> [CompiledFilter] {
++        filters.map { filter in
++            let options: NSRegularExpression.Options = filter.caseInsensitive ? [.caseInsensitive] : []
++            return CompiledFilter(
++                filter: filter,
++                regex: try? NSRegularExpression(pattern: filter.text, options: options)
++            )
++        }
++    }
++
++    private func matches(_ compiled: CompiledFilter, text: String) -> Bool {
++        guard let regex = compiled.regex else { return false }
+         let range = NSRange(text.startIndex..<text.endIndex, in: text)
+         let found = regex.firstMatch(in: text, options: [], range: range) != nil
+-        return filter.reversed ? !found : found
++        return compiled.filter.reversed ? !found : found
+     }
+ }
+diff --git a/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift b/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift
+index 020d5be3..999b42d5 100644
+--- a/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift
++++ b/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift
+@@ -34,6 +34,11 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
+     case removeMessageTail(Bool)
+     case editedMark(String)
+     case translationProvider(TranslationProvider)
++    case messageBubbleRadius(Int)
++    case avatarCorners(Int)
++    case messageShotBackground(Bool)
++    case messageShotDate(Bool)
++    case messageShotReactions(Bool)
+ 
+     var section: ItemListSectionId {
+         switch self {
+@@ -45,7 +50,7 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
+             return AyuSettingsSection.history.rawValue
+         case .filtersEnabled, .filtersEnabledInChats, .openFilters:
+             return AyuSettingsSection.filters.rawValue
+-        case .filterZalgo, .showMessageShot, .showMessageSeconds, .removeMessageTail, .editedMark, .translationProvider:
++        case .filterZalgo, .showMessageShot, .showMessageSeconds, .removeMessageTail, .editedMark, .translationProvider, .messageBubbleRadius, .avatarCorners, .messageShotBackground, .messageShotDate, .messageShotReactions:
+             return AyuSettingsSection.display.rawValue
+         }
+     }
+@@ -88,6 +93,16 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
+             return 305
+         case .translationProvider:
+             return 306
++        case .messageBubbleRadius:
++            return 307
++        case .avatarCorners:
++            return 308
++        case .messageShotBackground:
++            return 309
++        case .messageShotDate:
++            return 310
++        case .messageShotReactions:
++            return 311
+         }
+     }
+ 
+@@ -110,7 +125,12 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
+              let (.showMessageSeconds(a), .showMessageSeconds(b)),
+              let (.removeMessageTail(a), .removeMessageTail(b)),
+              let (.editedMark(a), .editedMark(b)),
+-             let (.translationProvider(a), .translationProvider(b)):
++             let (.translationProvider(a), .translationProvider(b)),
++             let (.messageBubbleRadius(a), .messageBubbleRadius(b)),
++             let (.avatarCorners(a), .avatarCorners(b)),
++             let (.messageShotBackground(a), .messageShotBackground(b)),
++             let (.messageShotDate(a), .messageShotDate(b)),
++             let (.messageShotReactions(a), .messageShotReactions(b)):
+             return a == b
+         default:
+             return false
+@@ -169,6 +189,20 @@ private enum AyuSettingsEntry: ItemListNodeEntry {
+             return ItemListActionItem(presentationData: presentationData, title: "Translation provider: \(title)", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                 arguments.updateSettings { $0.translationProvider = value.next() }
+             })
++        case let .messageBubbleRadius(value):
++            return ItemListActionItem(presentationData: presentationData, title: "Message bubble radius: \(value)", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
++                arguments.updateSettings { $0.messageBubbleRadius = $0.messageBubbleRadius >= 28 ? 8 : $0.messageBubbleRadius + 4 }
++            })
++        case let .avatarCorners(value):
++            return ItemListActionItem(presentationData: presentationData, title: "Avatar corners: \(value)", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
++                arguments.updateSettings { $0.avatarCorners = $0.avatarCorners >= 32 ? 8 : $0.avatarCorners + 4 }
++            })
++        case let .messageShotBackground(value):
++            return ItemListSwitchItem(presentationData: presentationData, title: "Message Shot background", value: value, sectionId: self.section, style: .blocks, updated: { value in arguments.updateSettings { $0.messageShot.showBackground = value } })
++        case let .messageShotDate(value):
++            return ItemListSwitchItem(presentationData: presentationData, title: "Message Shot date", value: value, sectionId: self.section, style: .blocks, updated: { value in arguments.updateSettings { $0.messageShot.showDate = value } })
++        case let .messageShotReactions(value):
++            return ItemListSwitchItem(presentationData: presentationData, title: "Message Shot reactions", value: value, sectionId: self.section, style: .blocks, updated: { value in arguments.updateSettings { $0.messageShot.showReactions = value } })
+         }
+     }
+ }
+@@ -226,7 +260,12 @@ private func ayuSettingsEntries(settings: AyuSettings, accountID: Int64) -> [Ayu
+         .showMessageSeconds(settings.showMessageSeconds),
+         .removeMessageTail(settings.removeMessageTail),
+         .editedMark(settings.editedMark),
+-        .translationProvider(settings.translationProvider)
++        .translationProvider(settings.translationProvider),
++        .messageBubbleRadius(settings.messageBubbleRadius),
++        .avatarCorners(settings.avatarCorners),
++        .messageShotBackground(settings.messageShot.showBackground),
++        .messageShotDate(settings.messageShot.showDate),
++        .messageShotReactions(settings.messageShot.showReactions)
+     ]
+ }
+ 
+diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift b/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift
+index 2dcfc95e..a671a364 100644
+--- a/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift
++++ b/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift
+@@ -5,6 +5,7 @@ import Display
+ import SwiftSignalKit
+ import Postbox
+ import TelegramCore
++import AyuGramIOS
+ import TelegramPresentationData
+ import TelegramUIPreferences
+ import TextFormat
+@@ -2360,6 +2361,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
+         } else {
+             bubbleReactions = ReactionsMessageAttribute(canViewList: false, isTags: false, reactions: [], recentPeers: [], topPeers: [])
+         }
++        let ayuRemoveMessageTail = AyuGramRuntime.settings(accountID: item.context.account.peerId.toInt64())?.removeMessageTail ?? false
++
+         if !bubbleReactions.reactions.isEmpty && !item.presentationData.isPreview {
+             if incoming {
+                 bottomNodeMergeStatus = .Left
+@@ -3392,7 +3395,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
+                                 case .Right:
+                                     bottomLeft = .none(tail: false)
+                                 case let .None(tailStatus):
+-                                    if case .Incoming = tailStatus {
++                                    if case .Incoming = tailStatus, !ayuRemoveMessageTail {
+                                         bottomLeft = .none(tail: true)
+                                     } else {
+                                         bottomLeft = .none(tail: false)
+@@ -3409,7 +3412,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
+                                 case .Right, .Both:
+                                     bottomRight = .mergedBubble
+                                 case let .None(tailStatus):
+-                                    if case .Outgoing = tailStatus {
++                                    if case .Outgoing = tailStatus, !ayuRemoveMessageTail {
+                                         bottomRight = .none(tail: true)
+                                     } else {
+                                         bottomRight = .none(tail: false)
+diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift b/submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift
+index addfa1b5..b15467b4 100644
+--- a/submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift
++++ b/submodules/TelegramUI/Components/Chat/ChatMessageTextBubbleContentNode/Sources/ChatMessageTextBubbleContentNode.swift
+@@ -446,6 +446,29 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
+                 }
+                 
+                 
++                let ayuSettings = AyuGramRuntime.settings(accountID: item.context.account.peerId.toInt64())
++                if ayuSettings?.filterZalgo == true {
++                    rawText = AyuTextSanitizer.filterZalgo(rawText)
++                }
++                let isBroadcast: Bool = {
++                    guard let channel = item.message.peers[item.message.id.peerId] as? TelegramChannel else { return false }
++                    if case .broadcast = channel.info {
++                        return true
++                    }
++                    return false
++                }()
++                let ayuFiltered = AyuGramRuntime.shouldFilterMessage(
++                    text: rawText,
++                    dialogID: item.message.id.peerId.toInt64(),
++                    accountID: item.context.account.peerId.toInt64(),
++                    incoming: incoming,
++                    isBroadcast: isBroadcast
++                )
++                if ayuFiltered {
++                    rawText = ""
++                    messageEntities = nil
++                }
++
+                 if incoming && item.associatedData.isSuspiciousPeer, let entities = messageEntities {
+                     messageEntities = entities.filter { entity in
+                         switch entity.type {
+diff --git a/submodules/TelegramUI/Sources/AyuMessageShotRenderer.swift b/submodules/TelegramUI/Sources/AyuMessageShotRenderer.swift
+index 305f68e0..0d00766f 100644
+--- a/submodules/TelegramUI/Sources/AyuMessageShotRenderer.swift
++++ b/submodules/TelegramUI/Sources/AyuMessageShotRenderer.swift
+@@ -5,6 +5,7 @@ import AyuGramIOS
+ 
+ public enum AyuMessageShotRenderer {
+     public static func render(message: Message, settings: AyuSettings) -> UIImage? {
++        let shotSettings = settings.messageShot
+         let maxWidth: CGFloat = 560.0
+         let horizontalPadding: CGFloat = 24.0
+         let cardInset: CGFloat = 8.0
+@@ -46,7 +47,7 @@ public enum AyuMessageShotRenderer {
+         }
+ 
+         var reactionLine: String?
+-        if settings.showReactions,
++        if shotSettings.showReactions,
+            let reactions = message.attributes.compactMap({ $0 as? ReactionsMessageAttribute }).first,
+            !reactions.reactions.isEmpty {
+             let summary = reactions.reactions.prefix(6).compactMap { reaction -> String? in
+@@ -87,8 +88,8 @@ public enum AyuMessageShotRenderer {
+             contentHeight += rect.height + 10.0
+         }
+ 
+-        let headerHeight: CGFloat = settings.showHeaderDecorations ? 38.0 : 0.0
+-        let footerHeight: CGFloat = 26.0
++        let headerHeight: CGFloat = shotSettings.showHeaderDecorations ? 38.0 : 0.0
++        let footerHeight: CGFloat = shotSettings.showDate ? 26.0 : 0.0
+         let height = max(112.0, contentHeight + headerHeight + footerHeight + horizontalPadding * 2.0)
+         let renderer = UIGraphicsImageRenderer(size: CGSize(width: maxWidth, height: height))
+         return renderer.image { context in
+@@ -96,7 +97,7 @@ public enum AyuMessageShotRenderer {
+             UIColor.systemBackground.setFill()
+             context.cgContext.fill(bounds)
+ 
+-            if settings.showBackground {
++            if shotSettings.showBackground {
+                 let background = bounds.insetBy(dx: cardInset, dy: cardInset)
+                 UIBezierPath(roundedRect: background, cornerRadius: CGFloat(max(8, settings.messageBubbleRadius))).addClip()
+                 UIColor.secondarySystemBackground.setFill()
+@@ -104,7 +105,7 @@ public enum AyuMessageShotRenderer {
+             }
+ 
+             var y = horizontalPadding
+-            if settings.showHeaderDecorations {
++            if shotSettings.showHeaderDecorations {
+                 UIColor.secondaryLabel.setFill()
+                 NSString(string: "AyuGram Message Shot").draw(
+                     in: CGRect(x: horizontalPadding, y: y, width: availableWidth, height: 18.0),
+@@ -130,10 +131,12 @@ public enum AyuMessageShotRenderer {
+                 y += 28.0
+             }
+ 
+-            NSString(string: dateText).draw(
+-                in: CGRect(x: horizontalPadding, y: height - footerHeight, width: availableWidth, height: 18.0),
+-                withAttributes: [.font: metaFont, .foregroundColor: UIColor.secondaryLabel]
+-            )
++            if shotSettings.showDate {
++                NSString(string: dateText).draw(
++                    in: CGRect(x: horizontalPadding, y: height - footerHeight, width: availableWidth, height: 18.0),
++                    withAttributes: [.font: metaFont, .foregroundColor: UIColor.secondaryLabel]
++                )
++            }
+         }
+     }
+ }
+diff --git a/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift b/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift
+index 8de49d0f..f9ecd053 100644
+--- a/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift
++++ b/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift
+@@ -683,10 +683,19 @@ extension ChatControllerImpl {
+             }
+         }
+         
+-        if #available(iOS 18.0, *) {
+-            if engineExperimentalInternalTranslationService == nil, let hostView = self.context.sharedContext.mainWindow?.hostView {
+-                let translationService = ExperimentalInternalTranslationServiceImpl(view: hostView.containerView)
+-                engineExperimentalInternalTranslationService = translationService
++        let ayuTranslationProvider = AyuGramRuntime.settings(accountID: self.context.account.peerId.toInt64())?.translationProvider ?? .telegram
++        switch ayuTranslationProvider {
++        case .google, .yandex:
++            engineExperimentalInternalTranslationService = AyuGramTranslationService(accountID: self.context.account.peerId.toInt64())
++        case .telegram:
++            engineExperimentalInternalTranslationService = nil
++        case .native:
++            if #available(iOS 18.0, *) {
++                if let hostView = self.context.sharedContext.mainWindow?.hostView {
++                    engineExperimentalInternalTranslationService = ExperimentalInternalTranslationServiceImpl(view: hostView.containerView)
++                }
++            } else {
++                engineExperimentalInternalTranslationService = nil
+             }
+         }
+         
+diff --git a/submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift b/submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift
+index d60fcae7..979ed526 100644
+--- a/submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift
++++ b/submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift
+@@ -69,13 +69,8 @@ func chatHistoryEntriesForView(
+         return ([], currentState)
+     }
+ 
+-    let ayuSettings = AyuGramRuntime.settings(accountID: context.account.peerId.toInt64())
+-    let ayuFilterEngine: RegexFilterEngine?
+-    if let ayuSettings, ayuSettings.filtersEnabled {
+-        ayuFilterEngine = RegexFilterEngine(filters: ayuSettings.regexFilters, exclusions: ayuSettings.regexFilterExclusions)
+-    } else {
+-        ayuFilterEngine = nil
+-    }
++    let ayuAccountID = context.account.peerId.toInt64()
++    let ayuSettings = AyuGramRuntime.settings(accountID: ayuAccountID)
+     var entries: [ChatHistoryEntry] = []
+     var adminRanks: [PeerId: CachedChannelAdminRank] = [:]
+     var stickersEnabled = true
+@@ -163,12 +158,24 @@ func chatHistoryEntriesForView(
+             continue
+         }
+ 
+-        // Apply AyuGram regex filters before the message becomes a chat entry.
+-        // Per-dialog rules are always eligible; shared rules additionally require
+-        // the desktop-compatible filtersEnabledInChats switch.
+-        if let ayuSettings, ayuSettings.filtersEnabled, let ayuFilterEngine {
+-            let includeShared = ayuSettings.filtersEnabledInChats
+-            if ayuFilterEngine.isFiltered(text: message.text, dialogID: message.id.peerId.toInt64(), includeShared: includeShared) {
++        // Match AyuGram Desktop: only incoming messages are filterable; per-dialog
++        // rules always apply, while shared rules apply in enabled chats or broadcast channels.
++        if let ayuSettings, ayuSettings.filtersEnabled {
++            let isIncoming = message.flags.contains(.Incoming)
++            let isBroadcast: Bool = {
++                guard let channel = message.peers[message.id.peerId] as? TelegramChannel else { return false }
++                if case .broadcast = channel.info {
++                    return true
++                }
++                return false
++            }()
++            if AyuGramRuntime.shouldFilterMessage(
++                text: message.text,
++                dialogID: message.id.peerId.toInt64(),
++                accountID: ayuAccountID,
++                incoming: isIncoming,
++                isBroadcast: isBroadcast
++            ) {
+                 continue
+             }
+         }
+diff --git a/submodules/TranslateUI/BUILD b/submodules/TranslateUI/BUILD
+index dfe9b76a..c20843ef 100644
+--- a/submodules/TranslateUI/BUILD
++++ b/submodules/TranslateUI/BUILD
+@@ -14,6 +14,7 @@ swift_library(
+         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
+         "//submodules/Display:Display",
+         "//submodules/TelegramCore:TelegramCore",
++        "//submodules/AyuGramIOS:AyuGramIOS",
+         "//submodules/TelegramPresentationData:TelegramPresentationData",
+         "//submodules/AccountContext:AccountContext",
+         "//submodules/AlertUI:AlertUI",
+diff --git a/submodules/TranslateUI/Sources/AyuGramTranslationService.swift b/submodules/TranslateUI/Sources/AyuGramTranslationService.swift
+new file mode 100644
+index 00000000..53d8cb71
+--- /dev/null
++++ b/submodules/TranslateUI/Sources/AyuGramTranslationService.swift
+@@ -0,0 +1,169 @@
++import Foundation
++import SwiftSignalKit
++import TelegramCore
++import AyuGramIOS
++
++/// Routes Telegram's optional local translation hook through the provider chosen
++/// in AyuGram settings. Telegram remains the fallback when the selected provider
++/// is not an external provider.
++public final class AyuGramTranslationService: ExperimentalInternalTranslationService {
++    private let accountID: Int64
++
++    public init(accountID: Int64) {
++        self.accountID = accountID
++    }
++
++    public func translate(texts: [AnyHashable: String], fromLang: String, toLang: String) -> Signal<[AnyHashable: String]?, NoError> {
++        guard let settings = AyuGramRuntime.settings(accountID: accountID) else {
++            return .single(nil)
++        }
++
++        switch settings.translationProvider {
++        case .telegram, .native:
++            return .single(nil)
++        case .google:
++            return translateEach(texts: texts, fromLang: fromLang, toLang: toLang, provider: .google)
++        case .yandex:
++            return translateEach(texts: texts, fromLang: fromLang, toLang: toLang, provider: .yandex)
++        }
++    }
++
++    private enum Provider {
++        case google
++        case yandex
++    }
++
++    private func translateEach(
++        texts: [AnyHashable: String],
++        fromLang: String,
++        toLang: String,
++        provider: Provider
++    ) -> Signal<[AnyHashable: String]?, NoError> {
++        Signal { subscriber in
++            if texts.isEmpty || toLang.isEmpty {
++                subscriber.putNext([:])
++                subscriber.putCompletion()
++                return EmptyDisposable
++            }
++
++            let lock = NSLock()
++            var results: [AnyHashable: String] = [:]
++            var pending = texts.count
++            var cancelled = false
++            var tasks: [URLSessionDataTask] = []
++
++            func finishOne(key: AnyHashable, value: String?) {
++                lock.lock()
++                if cancelled {
++                    lock.unlock()
++                    return
++                }
++                if let value, !value.isEmpty {
++                    results[key] = value
++                }
++                pending -= 1
++                let done = pending == 0
++                let finalResults = results
++                lock.unlock()
++
++                if done {
++                    subscriber.putNext(finalResults)
++                    subscriber.putCompletion()
++                }
++            }
++
++            for (key, value) in texts {
++                let task: URLSessionDataTask
++                switch provider {
++                case .google:
++                    guard let url = Self.googleURL(text: value, fromLang: fromLang, toLang: toLang) else {
++                        finishOne(key: key, value: nil)
++                        continue
++                    }
++                    var request = URLRequest(url: url)
++                    request.httpMethod = "GET"
++                    request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
++                    task = URLSession.shared.dataTask(with: request) { data, response, _ in
++                        guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else {
++                            finishOne(key: key, value: nil)
++                            return
++                        }
++                        finishOne(key: key, value: Self.parseGoogle(data: data))
++                    }
++                case .yandex:
++                    guard let url = Self.yandexURL(text: value, fromLang: fromLang, toLang: toLang) else {
++                        finishOne(key: key, value: nil)
++                        continue
++                    }
++                    var request = URLRequest(url: url)
++                    request.httpMethod = "GET"
++                    request.setValue("ru.yandex.translate/21.15.4.21402814 (iPhone; iOS 18)", forHTTPHeaderField: "User-Agent")
++                    task = URLSession.shared.dataTask(with: request) { data, response, _ in
++                        guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else {
++                            finishOne(key: key, value: nil)
++                            return
++                        }
++                        finishOne(key: key, value: Self.parseYandex(data: data))
++                    }
++                }
++                tasks.append(task)
++                task.resume()
++            }
++
++            return ActionDisposable {
++                lock.lock()
++                cancelled = true
++                lock.unlock()
++                for task in tasks {
++                    task.cancel()
++                }
++            }
++        }
++    }
++
++    private static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
++
++    private static func googleURL(text: String, fromLang: String, toLang: String) -> URL? {
++        var components = URLComponents(string: "https://translate.googleapis.com/translate_a/single")
++        components?.queryItems = [
++            URLQueryItem(name: "client", value: "gtx"),
++            URLQueryItem(name: "sl", value: fromLang.isEmpty ? "auto" : fromLang),
++            URLQueryItem(name: "tl", value: toLang),
++            URLQueryItem(name: "dt", value: "t"),
++            URLQueryItem(name: "ie", value: "UTF-8"),
++            URLQueryItem(name: "oe", value: "UTF-8"),
++            URLQueryItem(name: "q", value: text)
++        ]
++        return components?.url
++    }
++
++    private static func yandexURL(text: String, fromLang: String, toLang: String) -> URL? {
++        var components = URLComponents(string: "https://translate.yandex.net/api/v1/tr.json/translate")
++        let lang = fromLang.isEmpty ? toLang : "\(fromLang)-\(toLang)"
++        components?.queryItems = [
++            URLQueryItem(name: "srv", value: "iphone"),
++            URLQueryItem(name: "lang", value: lang),
++            URLQueryItem(name: "text", value: text)
++        ]
++        return components?.url
++    }
++
++    private static func parseGoogle(data: Data) -> String? {
++        guard let root = try? JSONSerialization.jsonObject(with: data) as? [Any],
++              let blocks = root.first as? [Any] else { return nil }
++        var output = ""
++        for block in blocks {
++            if let item = block as? [Any], let text = item.first as? String {
++                output += text
++            }
++        }
++        return output.isEmpty ? nil : output
++    }
++
++    private static func parseYandex(data: Data) -> String? {
++        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
++              let values = object["text"] as? [String] else { return nil }
++        let result = values.joined()
++        return result.isEmpty ? nil : result
++    }
++}

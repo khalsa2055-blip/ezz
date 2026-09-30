@@ -1,0 +1,8 @@
+1) فك الضغط.
+2) افتح https://github.com/khalsa2055-blip/ezz
+3) Add file -> Upload files.
+4) اسحب الملفات الموجودة داخل المجلد المفكوك إلى صفحة الرفع.
+5) Commit changes.
+6) Actions -> AyuGram iOS — Verify Patch -> Run workflow.
+
+ملاحظة: لا ترفع ملف ZIP نفسه فقط؛ GitHub لن يفك ZIP داخل المستودع تلقائيًا. المطلوب رفع محتويات ZIP بعد فك الضغط.
