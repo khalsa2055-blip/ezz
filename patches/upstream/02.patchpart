@@ -1,0 +1,275 @@
+own Postbox database.
++public struct AyuPostboxHistoryState: Codable, Equatable, Sendable {
++    public var version: Int32
++    public var nextFakeID: Int64
++    public var messages: [AyuMessage]
++
++    public init(version: Int32 = 1, nextFakeID: Int64 = 1, messages: [AyuMessage] = []) {
++        self.version = version
++        self.nextFakeID = nextFakeID
++        self.messages = messages
++    }
++}
++
++public enum AyuGramPostboxHistoryStore {
++    private static let key = ValueBoxKey("ayugram.messageHistory.v1")
++    private static let maximumEntries = 5000
++
++    public static func all(transaction: Transaction, limit: Int = 500) -> [AyuMessage] {
++        filtered(transaction: transaction, userID: nil, dialogID: nil, kind: .all, limit: limit)
++    }
++
++    public static func filtered(
++        transaction: Transaction,
++        userID: Int64? = nil,
++        dialogID: Int64? = nil,
++        kind: AyuHistoryKind = .all,
++        limit: Int = 500
++    ) -> [AyuMessage] {
++        let messages = read(transaction: transaction).messages.filter { message in
++            if let userID, message.userID != userID { return false }
++            if let dialogID, message.dialogID != dialogID { return false }
++            switch kind {
++            case .all:
++                return true
++            case .deleted:
++                return message.isDeleted
++            case .edited:
++                return !message.isDeleted
++            }
++        }
++        return Array(messages.sorted { $0.fakeID > $1.fakeID }.prefix(max(0, limit)))
++    }
++
++    public static func deleted(transaction: Transaction, userID: Int64, dialogID: Int64, topicID: Int64 = 0, query: String? = nil, limit: Int = 100) -> [AyuMessage] {
++        let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
++        let messages = read(transaction: transaction).messages.filter {
++            guard $0.isDeleted, $0.userID == userID, $0.dialogID == dialogID else { return false }
++            guard topicID == 0 || $0.topicID == topicID else { return false }
++            if let query = normalizedQuery, !query.isEmpty {
++                return $0.text.lowercased().contains(query)
++            }
++            return true
++        }
++        return Array(messages.sorted { $0.messageID > $1.messageID }.prefix(max(0, limit)))
++    }
++
++    public static func revisions(transaction: Transaction, userID: Int64, dialogID: Int64, messageID: Int32, limit: Int = 100) -> [AyuMessage] {
++        let messages = read(transaction: transaction).messages.filter {
++            !$0.isDeleted && $0.userID == userID && $0.dialogID == dialogID && $0.messageID == messageID
++        }
++        return Array(messages.sorted { $0.fakeID > $1.fakeID }.prefix(max(0, limit)))
++    }
++
++    @discardableResult
++    public static func appendDeleted(transaction: Transaction, messages snapshots: [AyuMessage]) -> [AyuMessage] {
++        append(transaction: transaction, snapshots: snapshots, deleted: true)
++    }
++
++    @discardableResult
++    public static func appendEdited(transaction: Transaction, messages snapshots: [AyuMessage]) -> [AyuMessage] {
++        append(transaction: transaction, snapshots: snapshots, deleted: false)
++    }
++
++    public static func clearDeleted(transaction: Transaction, userID: Int64, dialogID: Int64, topicID: Int64 = 0) {
++        var state = read(transaction: transaction)
++        state.messages.removeAll {
++            $0.isDeleted && $0.userID == userID && $0.dialogID == dialogID
++                && (topicID == 0 || $0.topicID == topicID)
++        }
++        transaction.setPreferencesEntry(key: key, value: PreferencesEntry(state))
++    }
++
++    public static func clearAll(transaction: Transaction) {
++        transaction.setPreferencesEntry(key: key, value: PreferencesEntry(AyuPostboxHistoryState()))
++    }
++
++    private static func append(transaction: Transaction, snapshots: [AyuMessage], deleted: Bool) -> [AyuMessage] {
++        guard !snapshots.isEmpty else { return [] }
++        var state = read(transaction: transaction)
++        var stored: [AyuMessage] = []
++        stored.reserveCapacity(snapshots.count)
++
++        for snapshot in snapshots {
++            let value = AyuMessage(
++                fakeID: state.nextFakeID,
++                userID: snapshot.userID,
++                dialogID: snapshot.dialogID,
++                peerID: snapshot.peerID,
++                fromID: snapshot.fromID,
++                topicID: snapshot.topicID,
++                messageID: snapshot.messageID,
++                date: snapshot.date,
++                editDate: snapshot.editDate,
++                text: snapshot.text,
++                mediaPath: snapshot.mediaPath,
++                mimeType: snapshot.mimeType,
++                isDeleted: deleted
++            )
++            state.nextFakeID += 1
++            let duplicate = state.messages.contains { existing in
++                existing.userID == value.userID
++                && existing.dialogID == value.dialogID
++                && existing.topicID == value.topicID
++                && existing.messageID == value.messageID
++                && existing.isDeleted == value.isDeleted
++                && existing.editDate == value.editDate
++                && existing.text == value.text
++            }
++            if !duplicate {
++                state.messages.append(value)
++                stored.append(value)
++            }
++        }
++
++        if state.messages.count > maximumEntries {
++            state.messages.sort { $0.fakeID > $1.fakeID }
++            state.messages = Array(state.messages.prefix(maximumEntries))
++        }
++
++        transaction.setPreferencesEntry(key: key, value: PreferencesEntry(state))
++        return stored
++    }
++
++    private static func read(transaction: Transaction) -> AyuPostboxHistoryState {
++        return transaction.getPreferencesEntry(key: key)?.get(AyuPostboxHistoryState.self) ?? AyuPostboxHistoryState()
++    }
++}
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift /mnt/data/repo_mod/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift
+--- a/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift	2026-09-30 23:04:25.000000000 +0000
+@@ -0,0 +1,92 @@
++import Foundation
++
++public enum AyuGramRuntime {
++    public static let version = "1.3.0"
++    public static let sourceVersion = "AyuGram Desktop 7.0.9"
++    private static let settingsLock = NSLock()
++    private static var settingsStores: [Int64: AyuSettingsStore] = [:]
++    private static var filterEngineCache: [Int64: (settings: AyuSettings, engine: RegexFilterEngine)] = [:]
++
++    /// Returns a shared per-account settings store. Keeping one instance alive is
++    /// important because Ghost Mode is consulted from high-frequency network paths.
++    public static func cachedSettingsStore(accountID: Int64) throws -> AyuSettingsStore {
++        settingsLock.lock()
++        if let store = settingsStores[accountID] {
++            settingsLock.unlock()
++            return store
++        }
++        settingsLock.unlock()
++
++        let dir = try baseDirectory(accountID: accountID)
++        let store = try AyuSettingsStore(url: dir.appendingPathComponent("settings.json"))
++
++        settingsLock.lock()
++        if let existing = settingsStores[accountID] {
++            settingsLock.unlock()
++            return existing
++        }
++        settingsStores[accountID] = store
++        settingsLock.unlock()
++        return store
++    }
++
++    public static func settings(accountID: Int64) -> AyuSettings? {
++        return try? cachedSettingsStore(accountID: accountID).settings
++    }
++
++    /// Per-account persistent directory. The Telegram-iOS host can provide a
++    /// stable account identifier so history/settings never mix between accounts.
++    public static func baseDirectory(accountID: Int64) throws -> URL {
++        let support = try FileManager.default.url(
++            for: .applicationSupportDirectory,
++            in: .userDomainMask,
++            appropriateFor: nil,
++            create: true
++        )
++        let dir = support
++            .appendingPathComponent("AyuGram", isDirectory: true)
++            .appendingPathComponent(String(accountID), isDirectory: true)
++        try FileManager.default.createDirectory(
++            at: dir,
++            withIntermediateDirectories: true
++        )
++        return dir
++    }
++
++    public static func makeSettingsStore(accountID: Int64) throws -> AyuSettingsStore {
++        return try cachedSettingsStore(accountID: accountID)
++    }
++
++    public static func shouldFilterMessage(
++        text: String,
++        dialogID: Int64,
++        accountID: Int64,
++        incoming: Bool,
++        isBroadcast: Bool
++    ) -> Bool {
++        guard incoming, !text.isEmpty else { return false }
++        guard let settings = settings(accountID: accountID), settings.filtersEnabled else { return false }
++        guard settings.filtersEnabledInChats || isBroadcast else { return false }
++
++        settingsLock.lock()
++        let engine: RegexFilterEngine
++        if let cached = filterEngineCache[accountID], cached.settings == settings {
++            engine = cached.engine
++        } else {
++            let newEngine = RegexFilterEngine(
++                filters: settings.regexFilters,
++                exclusions: settings.regexFilterExclusions
++            )
++            filterEngineCache[accountID] = (settings, newEngine)
++            engine = newEngine
++        }
++        settingsLock.unlock()
++
++        return engine.isFiltered(
++            text: text,
++            dialogID: dialogID,
++            includeShared: true
++        )
++    }
++
++}
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/Sources/AyuHistoryDisplay.swift /mnt/data/repo_mod/submodules/AyuGramIOS/Sources/AyuHistoryDisplay.swift
+--- a/submodules/AyuGramIOS/Sources/AyuHistoryDisplay.swift	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/Sources/AyuHistoryDisplay.swift	2026-09-30 20:06:56.000000000 +0000
+@@ -0,0 +1,16 @@
++import Foundation
++
++public enum AyuHistoryDisplay {
++    public static func mark(isDeleted: Bool, settings: AyuSettings) -> String {
++        if isDeleted {
++            return settings.deletedMark.isEmpty ? "🧹" : settings.deletedMark
++        } else {
++            return settings.editedMark
++        }
++    }
++
++    public static func label(isDeleted: Bool, settings: AyuSettings) -> String {
++        let mark = mark(isDeleted: isDeleted, settings: settings)
++        return mark.isEmpty ? (isDeleted ? "Deleted" : "Edited") : mark
++    }
++}
+diff -ruN /mnt/data/repo_base/submodules/AyuGramIOS/Sources/AyuSettings.swift /mnt/data/repo_mod/submodules/AyuGramIOS/Sources/AyuSettings.swift	1970-01-01 00:00:00.000000000 +0000
++++ b/submodules/AyuGramIOS/Sources/AyuSettings.swift	2026-09-30 22:45:20.000000000 +0000
+@@ -0,0 +1,92 @@
++import Foundation
++
++public enum PeerIDDisplay: Int, Codable, Sendable { case hidden = 0, telegramAPI = 1, botAPI = 2 }
++public enum ChannelBottomButton: Int, Codable, Sendable { case hidden = 0, muteUnmute = 1, discussWithFallback = 2 }
++public enum ContextMenuVisibility: Int, Codable, Sendable { case hidden = 0, visible = 1, visibleWithModifier = 2 }
++public enum TranslationProvider: String, Codable, Sendable { case telegram, google, yandex, native }
++
++/// iOS-safe subset of AyuGram's persistent settings.
++/// Desktop-only values are intentionally not represented here yet.
++public struct AyuSettings: Codable, Equatable, Sendable {
++    public var useGlobalGhostMode = true
++
++    public var saveDeletedMessages = true
++    public var saveMessagesHistory = true
++    public var saveForBots = false
++    public var filtersEnabled = false
++    public var filtersEnabledInChats = false
++    public var hideFromBlocked = false
++    public var semiTransparentDeleted
