@@ -1,0 +1,60 @@
+name: AyuGram iOS — Verify Patch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-26
+    steps:
+      - name: Checkout ezz
+        uses: actions/checkout@v4
+
+      - name: Check Xcode
+        run: xcodebuild -version
+
+      - name: Clone Telegram-iOS baseline
+        run: |
+          git clone --recursive --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
+          cd telegram-ios
+          git fetch --depth 1 origin 6ad963e5b62d354da79040f388ae2b9132fb17b8
+          git checkout --detach 6ad963e5b62d354da79040f388ae2b9132fb17b8
+
+      - name: Verify Telegram toolchain
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          import json
+          with open("versions.json", encoding="utf-8") as f:
+              v = json.load(f)
+          assert v["app"] == "12.9.2", v
+          assert v["xcode"] == "26.2", v
+          print("Telegram-iOS baseline:", v["app"])
+          print("Required Xcode:", v["xcode"])
+          print("Required macOS runner:", v["macos"])
+          PY
+
+      - name: Apply AyuGram patch
+        run: |
+          cp patches/ayugram-1.3.0.patch telegram-ios/
+          cd telegram-ios
+          git apply --check ayugram-1.3.0.patch
+          git apply ayugram-1.3.0.patch
+
+      - name: Show changed files
+        working-directory: telegram-ios
+        run: |
+          git status --short
+          git diff --check
+
+      - name: Verify AyuGram marker
+        run: |
+          test -f telegram-ios/submodules/AyuGramIOS/BUILD
+          test -f telegram-ios/submodules/AyuGramIOS/Sources/AyuGramRuntime.swift
+          grep -q 'AyuGram iOS Port Status' telegram-ios/submodules/AyuGramIOS/PORT_STATUS.md
+          echo "AyuGram patch verification passed."
