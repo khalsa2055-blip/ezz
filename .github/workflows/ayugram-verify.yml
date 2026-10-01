@@ -20,9 +20,8 @@ jobs:
 
       - name: Clone Telegram-iOS baseline
         run: |
-          git clone --recursive --depth 1 https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
+          git clone --recursive https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
           cd telegram-ios
-          git fetch --depth 1 origin 6ad963e5b62d354da79040f388ae2b9132fb17b8
           git checkout --detach 6ad963e5b62d354da79040f388ae2b9132fb17b8
 
       - name: Verify Telegram toolchain
