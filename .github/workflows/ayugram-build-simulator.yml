@@ -95,6 +95,33 @@ jobs:
             --buildNumber=100001 \
             --configuration=debug_sim_arm64
 
+      - name: Disable provisioning profiles for simulator build
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build-system/Make/Make.py")
+          s = p.read_text(encoding="utf-8")
+          needle = "    bazel_command_line.set_custom_target(arguments.target)\n"
+          replacement = needle + "    if arguments.configuration in ('debug_sim_arm64', 'release_sim_arm64'):\n        bazel_command_line.set_disable_provisioning_profiles()\n"
+          if replacement not in s:
+              if needle not in s:
+                  raise SystemExit("Make.py build hook not found")
+              s = s.replace(needle, replacement, 1)
+              p.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Re-run simulator build without provisioning profiles
+        working-directory: telegram-ios
+        run: |
+          python3 build-system/Make/Make.py \\
+            --cacheDir="$HOME/telegram-bazel-cache" \\
+            build \\
+            --configurationPath=build-system/ayugram-ci-configuration.json \\
+            --xcodeManagedCodesigning \\
+            --buildNumber=100001 \\
+            --configuration=debug_sim_arm64
+
       - name: Collect simulator artifacts
         working-directory: telegram-ios
         run: |
