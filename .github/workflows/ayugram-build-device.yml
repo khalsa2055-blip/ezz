@@ -1,0 +1,235 @@
+name: AyuGram iOS — Build Device
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/ayugram-build-device.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-device:
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v5
+
+      - name: Select Xcode 26.2 when available
+        run: |
+          if [ -d "/Applications/Xcode_26.2.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_26.2.app/Contents/Developer"
+          fi
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Validate required Telegram API secrets
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          test -n "$TELEGRAM_API_ID" || { echo "Missing repository secret TELEGRAM_API_ID"; exit 1; }
+          test -n "$TELEGRAM_API_HASH" || { echo "Missing repository secret TELEGRAM_API_HASH"; exit 1; }
+          case "$TELEGRAM_API_ID" in
+            *[!0-9]*) echo "TELEGRAM_API_ID must be numeric"; exit 1 ;;
+          esac
+
+      - name: Clone Telegram-iOS baseline
+        run: |
+          git clone --recursive https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
+          cd telegram-ios
+          git checkout --detach 6ad963e5b62d354da79040f388ae2b9132fb17b8
+
+      - name: Check Telegram baseline
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          import json
+          with open("versions.json", encoding="utf-8") as f:
+              v = json.load(f)
+          assert v["app"] == "12.9.2", v
+          assert v["xcode"] == "26.2", v
+          print("Baseline:", v["app"], "Xcode:", v["xcode"], "macOS:", v["macos"])
+          PY
+
+      - name: Validate and apply AyuGram patch
+        run: |
+          cp patches/ayugram-1.3.0.patch telegram-ios/ayugram-1.3.0.patch
+          cd telegram-ios
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          patch = Path("ayugram-1.3.0.patch").read_text(encoding="utf-8")
+          sections = re.split(r"(?m)^diff --git ", patch)
+          applied = []
+
+          for raw in sections[1:]:
+              lines = raw.splitlines()
+              header = lines[0]
+              m = re.match(r"a/(.+?) b/(.+)$", header)
+              if not m:
+                  raise SystemExit(f"Bad diff header: {header!r}")
+              target = Path(m.group(2))
+              meta = lines[1:8]
+              is_new = any(x.startswith("new file mode ") for x in meta)
+              is_deleted = any(x.startswith("deleted file mode ") for x in meta)
+
+              hunks = []
+              i = 0
+              while i < len(lines):
+                  if lines[i].startswith("@@ "):
+                      hm = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", lines[i])
+                      if not hm:
+                          raise SystemExit(f"Bad hunk header in {target}: {lines[i]!r}")
+                      old_start = int(hm.group(1))
+                      body = []
+                      i += 1
+                      while i < len(lines) and not lines[i].startswith("@@ ") and not lines[i].startswith("diff --git "):
+                          if not lines[i].startswith("\\ No newline at end of file"):
+                              body.append(lines[i])
+                          i += 1
+                      hunks.append((old_start, body))
+                  else:
+                      i += 1
+
+              if is_deleted:
+                  if target.exists():
+                      target.unlink()
+                  applied.append(str(target))
+                  continue
+
+              if is_new:
+                  new_lines = []
+                  for line in hunks[0][1] if hunks else []:
+                      if line.startswith("+") or line.startswith(" "):
+                          new_lines.append(line[1:])
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
+                  applied.append(str(target))
+                  continue
+
+              if not target.exists():
+                  raise SystemExit(f"Target file missing: {target}")
+              current = target.read_text(encoding="utf-8").splitlines()
+              cursor = 0
+
+              for old_line, body in hunks:
+                  old_lines = [x[1:] for x in body if x.startswith(" ") or x.startswith("-")]
+                  new_lines = [x[1:] for x in body if x.startswith(" ") or x.startswith("+")]
+
+                  if old_lines:
+                      hint = max(0, old_line - 1)
+                      positions = [hint] + list(range(cursor, max(cursor, len(current) - len(old_lines) + 1)))
+                      seen = set()
+                      found = None
+                      for pos in positions:
+                          if pos in seen:
+                              continue
+                          seen.add(pos)
+                          if pos + len(old_lines) <= len(current) and current[pos:pos + len(old_lines)] == old_lines:
+                              found = pos
+                              break
+                      if found is None:
+                          raise SystemExit(f"Context mismatch applying {target} near old line {old_line}")
+                      current[found:found + len(old_lines)] = new_lines
+                      cursor = found + len(new_lines)
+                  else:
+                      insert_at = max(0, min(len(current), old_line - 1))
+                      current[insert_at:insert_at] = new_lines
+                      cursor = insert_at + len(new_lines)
+
+              target.write_text("\n".join(current) + ("\n" if current else ""), encoding="utf-8")
+              applied.append(str(target))
+
+          print("Applied", len(applied), "diff sections")
+          PY
+          git diff --check
+
+      - name: Create device build configuration
+        working-directory: telegram-ios
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          src = json.loads(Path("build-system/template_minimal_development_configuration.json").read_text())
+          src["bundle_id"] = "org.ayugram.ezz"
+          src["api_id"] = os.environ["TELEGRAM_API_ID"]
+          src["api_hash"] = os.environ["TELEGRAM_API_HASH"]
+          src["team_id"] = "0000000000"
+          src["is_internal_build"] = "true"
+          src["is_appstore_build"] = "false"
+          Path("build-system/ayugram-ci-configuration.json").write_text(
+              json.dumps(src, indent=2) + "\n",
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Prepare unsigned device build
+        working-directory: telegram-ios
+        run: |
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build-system/Make/Make.py")
+          s = p.read_text(encoding="utf-8")
+          needle = "    bazel_command_line.set_custom_target(arguments.target)\n"
+          replacement = needle + "    if arguments.configuration in ('debug_arm64', 'release_arm64', 'debug_sim_arm64', 'release_sim_arm64'):\n        bazel_command_line.set_disable_provisioning_profiles()\n"
+          if needle not in s:
+              raise SystemExit("Make.py build hook not found")
+          s = s.replace(needle, replacement, 1)
+          p.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Build AyuGram for iPhone (arm64)
+        working-directory: telegram-ios
+        run: |
+          python3 -u build-system/Make/Make.py \
+            --cacheDir="$HOME/telegram-bazel-cache" \
+            build \
+            --configurationPath=build-system/ayugram-ci-configuration.json \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --buildNumber=100002 \
+            --configuration=debug_arm64
+
+      - name: Collect unsigned device IPA
+        working-directory: telegram-ios
+        run: |
+          set -e
+          mkdir -p ci-artifacts/check
+          ipa="bazel-bin/Telegram/Telegram.ipa"
+          if [ ! -f "$ipa" ]; then
+            ipa=$(find bazel-bin -type f -name "Telegram.ipa" -print -quit || true)
+          fi
+          if [ -z "$ipa" ] || [ ! -f "$ipa" ]; then
+            echo "No device IPA was produced." >&2
+            find bazel-bin -maxdepth 5 -type f | head -200 || true
+            exit 1
+          fi
+
+          cp "$ipa" "ci-artifacts/AyuGram-iOS-device-unsigned.ipa"
+
+          unzip -q -o "$ipa" -d ci-artifacts/check
+          app=$(find ci-artifacts/check/Payload -type d -name "*.app" -print -quit)
+          test -n "$app" && test -d "$app"
+          echo "Device app bundle: $app"
+
+          rm -rf ci-artifacts/check
+          ls -lh ci-artifacts
+
+      - name: Upload device IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-iOS-device-unsigned-${{ github.run_number }}
+          path: telegram-ios/ci-artifacts
+          if-no-files-found: error
