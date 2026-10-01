@@ -1698,6 +1698,7 @@ new file mode 100644
 +        "//submodules/AccountContext",
 +        "//submodules/Display",
 +        "//submodules/ItemListUI",
++        "//submodules/PresentationDataUtils:PresentationDataUtils",
 +        "//submodules/SSignalKit/SwiftSignalKit",
 +        "//submodules/TelegramCore",
 +        "//submodules/TelegramPresentationData",
@@ -1715,6 +1716,7 @@ new file mode 100644
 +import SwiftSignalKit
 +import TelegramPresentationData
 +import ItemListUI
++import PresentationDataUtils
 +import AccountContext
 +import AyuGramIOS
 +
