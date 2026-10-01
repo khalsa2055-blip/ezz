@@ -13,7 +13,7 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Checkout ezz
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Check Xcode
         run: xcodebuild -version
@@ -42,6 +42,13 @@ jobs:
         run: |
           cp patches/ayugram-1.3.0.patch telegram-ios/
           cd telegram-ios
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("ayugram-1.3.0.patch")
+          data = p.read_text(encoding="utf-8")
+          data = data.replace("100644--- /dev/null", "100644\\n--- /dev/null")
+          p.write_text(data, encoding="utf-8")
+          PY
           git apply --check ayugram-1.3.0.patch
           git apply ayugram-1.3.0.patch
 
