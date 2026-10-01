@@ -1203,6 +1203,14 @@ diff --git a/submodules/TelegramCore/Sources/Account/Account.swift b/submodules/
 diff --git a/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift b/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift
 --- a/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift
 +++ b/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift
+@@ -1,6 +1,7 @@
+ import Foundation
+ import Postbox
+ import SwiftSignalKit
+ import TelegramApi
+ import MtProtoKit
+ import EncryptionProvider
++import AyuGramIOS
 @@ -4451,7 +4451,7 @@
              case let .DeleteMessages(ids):
                  _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, manualAddMessageThreadStatsDifference: { id, add, remove in
@@ -1260,7 +1268,7 @@ diff --git a/submodules/TelegramCore/Sources/State/AccountViewTracker.swift b/su
                                  return .complete()
                              }
 -                            return account.network.request(Api.functions.messages.getMessagesViews(peer: inputPeer, id: messageIds.map { $0.id }, increment: .boolTrue))
-+                            return account.network.request(Api.functions.messages.getMessagesViews(peer: inputPeer, id: messageIds.map { $0.id }, increment: .bool(AyuGramGhostGate.shouldSend(.readMessages, accountID: accountPeerId.toInt64()))))
++                            return account.network.request(Api.functions.messages.getMessagesViews(peer: inputPeer, id: messageIds.map { $0.id }, increment: AyuGramGhostGate.shouldSend(.readMessages, accountID: accountPeerId.toInt64()) ? .boolTrue : .boolFalse))
                              |> map(Optional.init)
                              |> `catch` { _ -> Signal<Api.messages.MessageViews?, NoError> in
                                  return .single(nil)
@@ -1268,7 +1276,7 @@ diff --git a/submodules/TelegramCore/Sources/State/AccountViewTracker.swift b/su
                      if let account = self.account {
                          let signal = (account.postbox.transaction { transaction -> Signal<Void, NoError> in
                              if let peer = transaction.getPeer(peerId), let inputPeer = apiInputPeer(peer) {
-+                                guard AyuGramGhostGate.shouldSend(.readMessages, accountID: accountPeerId.toInt64()) else {
++                                guard AyuGramGhostGate.shouldSend(.readMessages, accountID: self.accountPeerId.toInt64()) else {
 +                                    return .complete()
 +                                }
                                  let request: Signal<Bool, MTRpcError>
@@ -1377,7 +1385,7 @@ diff --git a/submodules/TelegramCore/Sources/State/ManagedAccountPresence.swift 
          let queue = self.queue
          self.impl = QueueLocalObject(queue: self.queue, generate: {
 -            return AccountPresenceManagerImpl(queue: queue, shouldKeepOnlinePresence: shouldKeepOnlinePresence, network: network)
-+            return AccountPresenceManagerImpl(queue: queue, shouldKeepOnlinePresence: shouldKeepOnlinePresence, network: network, accountPeerId: accountPeerId)
++            return AccountPresenceManagerImpl(queue: queue, shouldKeepOnlinePresence: shouldKeepOnlinePresence, network: network, accountPeerId: accountPeerId.toInt64())
          })
      }
      
@@ -1467,7 +1475,7 @@ diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizePeerReadSta
 -func managedSynchronizePeerReadStates(network: Network, postbox: Postbox, stateManager: AccountStateManager) -> Signal<Void, NoError> {
 +func managedSynchronizePeerReadStates(network: Network, postbox: Postbox, stateManager: AccountStateManager, accountID: Int64) -> Signal<Void, NoError> {
      return Signal { _ in
-         let context = SynchronizePeerReadStatesStatesContext(network: network, postbox: postbox, stateManager: stateManager)
+         let context = SynchronizePeerReadStatesStatesContext(network: network, postbox: postbox, stateManager: stateManager, accountID: accountID)
          
 diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift b/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift
 --- a/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift
@@ -1587,7 +1595,13 @@ diff --git a/submodules/TelegramCore/Sources/State/SynchronizePeerReadState.swif
 diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift b/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift
 --- a/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift
 +++ b/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift
-@@ -22,7 +22,12 @@
+@@ -1,4 +1,5 @@
+ import Foundation
+ import Postbox
+ import SwiftSignalKit
+ import TelegramApi
++import AyuGramIOS
+@@ -22,7 +23,12 @@
      }
  }
  
@@ -1609,7 +1623,7 @@ diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessa
          }
      }
 -    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId))
-+    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId), ayuAccountID: account.peerId.toInt64())
++    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId))
      
      stateManager?.notifyDeletedMessages(messageIds: messageIds.map(\.messageId))
      
