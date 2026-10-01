@@ -205,18 +205,35 @@ jobs:
         working-directory: telegram-ios
         run: |
           set -e
-          mkdir -p ci-artifacts
-          find bazel-bin -type d -name "*.app" -print > ci-artifacts/app-paths.txt || true
-          if [ ! -s ci-artifacts/app-paths.txt ]; then
-            echo "No .app artifact was produced." >&2
-            find bazel-bin -maxdepth 4 -type f | head -200 || true
+          mkdir -p ci-artifacts/extracted
+          
+          # Telegram's simulator target is emitted as an IPA by this Make.py path.
+          # Extract the .app from the IPA for direct simulator use.
+          ipa="bazel-bin/Telegram/Telegram.ipa"
+          if [ ! -f "$ipa" ]; then
+            ipa=$(find bazel-bin -type f -name "*.ipa" -print -quit || true)
+          fi
+          if [ -z "$ipa" ] || [ ! -f "$ipa" ]; then
+            echo "No simulator IPA artifact was produced." >&2
+            find bazel-bin -maxdepth 5 -type f | head -200 || true
             exit 1
           fi
-          while IFS= read -r app; do
-            name=$(basename "$app")
-            ditto "$app" "ci-artifacts/$name"
-          done < ci-artifacts/app-paths.txt
-          tar -czf ci-artifacts/AyuGram-iOS-simulator-apps.tar.gz -C ci-artifacts $(find ci-artifacts -mindepth 1 -maxdepth 1 -type d -name "*.app" -exec basename {} \;)
+
+          echo "Using IPA: $ipa"
+          unzip -q -o "$ipa" -d ci-artifacts/extracted
+          app=$(find ci-artifacts/extracted/Payload -type d -name "*.app" -print -quit)
+          if [ -z "$app" ] || [ ! -d "$app" ]; then
+            echo "No .app bundle found inside simulator IPA." >&2
+            find ci-artifacts/extracted -maxdepth 4 -print | head -200 || true
+            exit 1
+          fi
+
+          name=$(basename "$app")
+          ditto "$app" "ci-artifacts/$name"
+          tar -czf ci-artifacts/AyuGram-iOS-simulator-apps.tar.gz -C ci-artifacts "$name"
+          cp "$ipa" "ci-artifacts/AyuGram-iOS-simulator.ipa"
+          rm -rf ci-artifacts/extracted
+
           ls -lh ci-artifacts
 
       - name: Upload simulator artifacts
