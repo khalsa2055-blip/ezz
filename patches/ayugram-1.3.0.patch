@@ -2509,7 +2509,7 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                        }
 +                    }
 +                    c?.dismiss(completion: {
-+                        controllerInteraction?.displayUndo(.info(title: nil, text: "Regex filter added", timeout: 2.0, customUndoText: nil))
++                        controllerInteraction.displayUndo(.info(title: nil, text: "Regex filter added", timeout: 2.0, customUndoText: nil))
 +                    })
 +                })))
 +            }
