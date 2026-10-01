@@ -84,17 +84,6 @@ jobs:
           )
           PY
 
-      - name: Build Telegram for iOS Simulator
-        working-directory: telegram-ios
-        run: |
-          python3 build-system/Make/Make.py \
-            --cacheDir="$HOME/telegram-bazel-cache" \
-            build \
-            --configurationPath=build-system/ayugram-ci-configuration.json \
-            --xcodeManagedCodesigning \
-            --buildNumber=100001 \
-            --configuration=debug_sim_arm64
-
       - name: Disable provisioning profiles for simulator build
         working-directory: telegram-ios
         run: |
@@ -111,15 +100,15 @@ jobs:
               p.write_text(s, encoding="utf-8")
           PY
 
-      - name: Re-run simulator build without provisioning profiles
+      - name: Build Telegram for iOS Simulator
         working-directory: telegram-ios
         run: |
-          python3 build-system/Make/Make.py \\
-            --cacheDir="$HOME/telegram-bazel-cache" \\
-            build \\
-            --configurationPath=build-system/ayugram-ci-configuration.json \\
-            --xcodeManagedCodesigning \\
-            --buildNumber=100001 \\
+          python3 build-system/Make/Make.py \
+            --cacheDir="$HOME/telegram-bazel-cache" \
+            build \
+            --configurationPath=build-system/ayugram-ci-configuration.json \
+            --xcodeManagedCodesigning \
+            --buildNumber=100001 \
             --configuration=debug_sim_arm64
 
       - name: Collect simulator artifacts
