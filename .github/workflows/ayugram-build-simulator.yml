@@ -2,8 +2,6 @@ name: AyuGram iOS — Build Simulator
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 permissions:
   contents: read
