@@ -91,7 +91,7 @@ jobs:
             --cacheDir="$HOME/telegram-bazel-cache" \
             build \
             --configurationPath=build-system/ayugram-ci-configuration.json \
-            --codesigningInformationPath=build-system/fake-codesigning \
+            --xcodeManagedCodesigning \
             --buildNumber=100001 \
             --configuration=debug_sim_arm64
 
