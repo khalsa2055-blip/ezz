@@ -1,3 +1,10 @@
+diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/BUILD b/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/BUILD
+--- a/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/BUILD
++++ b/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/BUILD
+@@ -12,6 +12,7 @@
+     deps = [
++        "//submodules/AyuGramIOS:AyuGramIOS",
+         "//submodules/AsyncDisplayKit",
 diff --git a/AYUGRAM_IOS_0.7.1.md b/AYUGRAM_IOS_0.7.1.md
 new file mode 100644
 --- /dev/null
@@ -2341,7 +2348,23 @@ diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sou
 diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift b/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift
 --- a/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift
 +++ b/submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift
-@@ -541,7 +541,12 @@
+@@ -1,13 +1,14 @@
+ import Foundation
+ import UIKit
+ import AsyncDisplayKit
+ import TelegramCore
+ import Display
+ import SwiftSignalKit
+ import TelegramPresentationData
+ import AccountContext
+ import AppBundle
+ import ReactionButtonListComponent
+ import ReactionImageComponent
+ import AnimationCache
+ import MultiAnimationRenderer
+ import TelegramStringFormatting
++import AyuGramIOS
+@@ -541,7 +542,12 @@
              if arguments.edited {
                  if let useEditedTimestamp = arguments.context.getAppConfigValue("message_primary_edited_date") as? Bool, useEditedTimestamp {
                  } else {
