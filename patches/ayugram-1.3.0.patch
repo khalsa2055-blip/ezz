@@ -2196,7 +2196,12 @@ diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/Pe
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
-@@ -271,6 +271,8 @@
+@@ -15,6 +15,7 @@
+ import InstantPageCache
++import AyuGramSettingsScreen
+ 
+ extension PeerInfoScreenNode {
+@@ -271,6 +272,8 @@
              self.interaction.editingOpenNameColorSetup()
          case .powerSaving:
              push(energySavingSettingsScreen(context: self.context))
