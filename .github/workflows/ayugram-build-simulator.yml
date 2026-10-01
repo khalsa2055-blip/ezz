@@ -57,9 +57,97 @@ jobs:
         run: |
           cp patches/ayugram-1.3.0.patch telegram-ios/ayugram-1.3.0.patch
           cd telegram-ios
-          git apply --check ayugram-1.3.0.patch
-          git apply --index ayugram-1.3.0.patch
-          git diff --cached --check
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          patch = Path("ayugram-1.3.0.patch").read_text(encoding="utf-8")
+          sections = re.split(r"(?m)^diff --git ", patch)
+          applied = []
+
+          for raw in sections[1:]:
+              lines = raw.splitlines()
+              header = lines[0]
+              m = re.match(r"a/(.+?) b/(.+)$", header)
+              if not m:
+                  raise SystemExit(f"Bad diff header: {header!r}")
+              target = Path(m.group(2))
+              meta = lines[1:8]
+              is_new = any(x.startswith("new file mode ") for x in meta)
+              is_deleted = any(x.startswith("deleted file mode ") for x in meta)
+
+              hunks = []
+              i = 0
+              while i < len(lines):
+                  if lines[i].startswith("@@ "):
+                      hm = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", lines[i])
+                      if not hm:
+                          raise SystemExit(f"Bad hunk header in {target}: {lines[i]!r}")
+                      old_start = int(hm.group(1))
+                      body = []
+                      i += 1
+                      while i < len(lines) and not lines[i].startswith("@@ ") and not lines[i].startswith("diff --git "):
+                          if not lines[i].startswith("\\ No newline at end of file"):
+                              body.append(lines[i])
+                          i += 1
+                      hunks.append((old_start, body))
+                  else:
+                      i += 1
+
+              if is_deleted:
+                  if target.exists():
+                      target.unlink()
+                  applied.append(str(target))
+                  continue
+
+              if is_new:
+                  new_lines = []
+                  for line in hunks[0][1] if hunks else []:
+                      if line.startswith("+") or line.startswith(" "):
+                          new_lines.append(line[1:])
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
+                  applied.append(str(target))
+                  continue
+
+              if not target.exists():
+                  raise SystemExit(f"Target file missing: {target}")
+              current = target.read_text(encoding="utf-8").splitlines()
+              cursor = 0
+
+              for old_line, body in hunks:
+                  old_lines = [x[1:] for x in body if x.startswith(" ") or x.startswith("-")]
+                  new_lines = [x[1:] for x in body if x.startswith(" ") or x.startswith("+")]
+
+                  if old_lines:
+                      hint = max(0, old_line - 1)
+                      positions = [hint] + list(range(cursor, max(cursor, len(current) - len(old_lines) + 1)))
+                      seen = set()
+                      found = None
+                      for pos in positions:
+                          if pos in seen:
+                              continue
+                          seen.add(pos)
+                          if pos + len(old_lines) <= len(current) and current[pos:pos + len(old_lines)] == old_lines:
+                              found = pos
+                              break
+                      if found is None:
+                          raise SystemExit(f"Context mismatch applying {target} near old line {old_line}")
+                      current[found:found + len(old_lines)] = new_lines
+                      cursor = found + len(new_lines)
+                  else:
+                      insert_at = max(0, min(len(current), old_line - 1))
+                      current[insert_at:insert_at] = new_lines
+                      cursor = insert_at + len(new_lines)
+
+              target.write_text("\n".join(current) + ("\n" if current else ""), encoding="utf-8")
+              applied.append(str(target))
+
+          print("Applied", len(applied), "diff sections")
+          for path in applied:
+              print("  ", path)
+          PY
+          git diff --check
 
       - name: Create simulator build configuration
         working-directory: telegram-ios
