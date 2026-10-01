@@ -1,0 +1,121 @@
+name: AyuGram iOS — Build Simulator
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-simulator:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v5
+
+      - name: Select Xcode 26.2 when available
+        run: |
+          if [ -d "/Applications/Xcode_26.2.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_26.2.app/Contents/Developer"
+          fi
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Validate required Telegram API secrets
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          test -n "$TELEGRAM_API_ID" || { echo "Missing repository secret TELEGRAM_API_ID"; exit 1; }
+          test -n "$TELEGRAM_API_HASH" || { echo "Missing repository secret TELEGRAM_API_HASH"; exit 1; }
+          case "$TELEGRAM_API_ID" in
+            *[!0-9]*) echo "TELEGRAM_API_ID must be numeric"; exit 1 ;;
+          esac
+          echo "Telegram API credentials are present."
+
+      - name: Clone Telegram-iOS baseline
+        run: |
+          git clone --recursive https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
+          cd telegram-ios
+          git checkout --detach 6ad963e5b62d354da79040f388ae2b9132fb17b8
+
+      - name: Check Telegram baseline
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          import json
+          with open("versions.json", encoding="utf-8") as f:
+              v = json.load(f)
+          assert v["app"] == "12.9.2", v
+          assert v["xcode"] == "26.2", v
+          print("Baseline:", v["app"], "Xcode:", v["xcode"], "macOS:", v["macos"])
+          PY
+
+      - name: Validate and apply AyuGram patch
+        run: |
+          cp patches/ayugram-1.3.0.patch telegram-ios/ayugram-1.3.0.patch
+          cd telegram-ios
+          git apply --check ayugram-1.3.0.patch
+          git apply --index ayugram-1.3.0.patch
+          git diff --cached --check
+
+      - name: Create simulator build configuration
+        working-directory: telegram-ios
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          src = json.loads(Path("build-system/template_minimal_development_configuration.json").read_text())
+          src["bundle_id"] = "org.ayugram.ezz"
+          src["api_id"] = os.environ["TELEGRAM_API_ID"]
+          src["api_hash"] = os.environ["TELEGRAM_API_HASH"]
+          src["team_id"] = "0000000000"
+          src["is_internal_build"] = "true"
+          src["is_appstore_build"] = "false"
+          Path("build-system/ayugram-ci-configuration.json").write_text(
+              json.dumps(src, indent=2) + "\n",
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Build Telegram for iOS Simulator
+        working-directory: telegram-ios
+        run: |
+          python3 build-system/Make/Make.py \
+            --cacheDir="$HOME/telegram-bazel-cache" \
+            build \
+            --configurationPath=build-system/ayugram-ci-configuration.json \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --buildNumber=100001 \
+            --configuration=debug_sim_arm64
+
+      - name: Collect simulator artifacts
+        working-directory: telegram-ios
+        run: |
+          set -e
+          mkdir -p ci-artifacts
+          find bazel-bin -type d -name "*.app" -print > ci-artifacts/app-paths.txt || true
+          if [ ! -s ci-artifacts/app-paths.txt ]; then
+            echo "No .app artifact was produced." >&2
+            find bazel-bin -maxdepth 4 -type f | head -200 || true
+            exit 1
+          fi
+          while IFS= read -r app; do
+            name=$(basename "$app")
+            ditto "$app" "ci-artifacts/$name"
+          done < ci-artifacts/app-paths.txt
+          tar -czf ci-artifacts/AyuGram-iOS-simulator-apps.tar.gz -C ci-artifacts $(find ci-artifacts -mindepth 1 -maxdepth 1 -type d -name "*.app" -exec basename {} \;)
+          ls -lh ci-artifacts
+
+      - name: Upload simulator artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-iOS-simulator-${{ github.run_number }}
+          path: telegram-ios/ci-artifacts
+          if-no-files-found: error
