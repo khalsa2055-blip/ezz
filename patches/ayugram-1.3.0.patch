@@ -1468,14 +1468,15 @@ diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizePeerReadSta
          })
      }
      
-@@ -142,7 +144,7 @@
+@@ -142,7 +142,7 @@
      }
  }
  
 -func managedSynchronizePeerReadStates(network: Network, postbox: Postbox, stateManager: AccountStateManager) -> Signal<Void, NoError> {
 +func managedSynchronizePeerReadStates(network: Network, postbox: Postbox, stateManager: AccountStateManager, accountID: Int64) -> Signal<Void, NoError> {
      return Signal { _ in
-         let context = SynchronizePeerReadStatesStatesContext(network: network, postbox: postbox, stateManager: stateManager, accountID: accountID)
+-        let context = SynchronizePeerReadStatesStatesContext(network: network, postbox: postbox, stateManager: stateManager)
++        let context = SynchronizePeerReadStatesStatesContext(network: network, postbox: postbox, stateManager: stateManager, accountID: accountID)
          
 diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift b/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift
 --- a/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift
