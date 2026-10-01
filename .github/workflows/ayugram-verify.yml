@@ -2,8 +2,6 @@ name: AyuGram iOS — Verify Patch
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 permissions:
   contents: read
