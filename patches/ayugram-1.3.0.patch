@@ -997,8 +997,7 @@ new file mode 100644
 +    }
 +}
 diff --git a/submodules/AyuGramIOS/Sources/MessageShot.swift b/submodules/AyuGramIOS/Sources/MessageShot.swift
-new file mode 100644
---- /dev/null
+new file mode 100644--- /dev/null
 +++ b/submodules/AyuGramIOS/Sources/MessageShot.swift
 @@ -0,0 +1,12 @@
 +import Foundation
