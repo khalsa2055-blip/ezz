@@ -2522,7 +2522,7 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                    }
 +                    c?.dismiss(completion: {
 +                        f(.default)
-+                        controllerInteraction?.displayUndo(.info(title: nil, text: "Message shot copied", timeout: 2.0, customUndoText: nil))
++                        controllerInteraction.displayUndo(.info(title: nil, text: "Message shot copied", timeout: 2.0, customUndoText: nil))
 +                    })
 +                })))
 +            }
