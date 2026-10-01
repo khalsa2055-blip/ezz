@@ -2231,6 +2231,7 @@ new file mode 100644
 +import Foundation
 +import UIKit
 +import TelegramCore
++import Postbox
 +import AyuGramIOS
 +
 +public enum AyuMessageShotRenderer {
@@ -2243,9 +2244,10 @@ new file mode 100644
 +        let bodyFont = UIFont.systemFont(ofSize: 17.0)
 +        let metaFont = UIFont.systemFont(ofSize: 12.0)
 +        let date = Date(timeIntervalSince1970: TimeInterval(message.timestamp))
-+        let dateText = settings.showMessageSeconds
-+            ? DateFormatter.ayuGramDateWithSeconds.string(from: date)
-+            : DateFormatter.ayuGramDate.string(from: date)
++        let formatter = DateFormatter()
++        formatter.dateStyle = .medium
++        formatter.timeStyle = settings.showMessageSeconds ? .medium : .short
++        let dateText = formatter.string(from: date)
 +
 +        var lines: [String] = []
 +        if !message.text.isEmpty {
@@ -2373,7 +2375,10 @@ new file mode 100644
 diff --git a/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift b/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift
 --- a/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift
 +++ b/submodules/TelegramUI/Sources/Chat/ChatControllerLoadDisplayNode.swift
-@@ -683,10 +683,19 @@
+@@ -37,6 +37,7 @@
+ import AttachmentTextInputPanelNode
++import AyuGramIOS
+@@ -683,10 +684,19 @@
              }
          }
          
