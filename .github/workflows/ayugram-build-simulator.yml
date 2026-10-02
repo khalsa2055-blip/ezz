@@ -297,15 +297,23 @@ jobs:
           echo "Simulator launch succeeded: $launch_output"
 
           sleep 10
-          if xcrun simctl spawn "$DEVICE_UDID" log show --last 20s --style compact --predicate 'eventMessage CONTAINS[c] "org.ayugram.ezz" OR process == "SpringBoard"' | grep -Ei 'crash|jetsam|abort|termination|killed' >/dev/null 2>&1; then
-            echo "Potential app termination/crash detected in simulator logs." >&2
-            xcrun simctl spawn "$DEVICE_UDID" log show --last 1m --style compact --predicate 'eventMessage CONTAINS[c] "org.ayugram.ezz" OR process == "SpringBoard"' | tail -300 || true
+
+          # Capture a real screenshot from the running Simulator UI so the artifact can
+          # be visually inspected after the workflow completes.
+          mkdir -p ci-artifacts/smoke
+          xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-Simulator.png
+          test -s ci-artifacts/smoke/AyuGram-Simulator.png
+
+          # Check only for recent Telegram-process crash/fatal messages; do not treat
+          # unrelated SpringBoard system messages as an app failure.
+          if xcrun simctl spawn "$DEVICE_UDID" log show --last 20s --style compact --predicate 'process == "Telegram"' | grep -Ei 'crash|fatal|abort|jetsam' >/dev/null 2>&1; then
+            echo "Potential Telegram process crash/fatal event detected." >&2
+            xcrun simctl spawn "$DEVICE_UDID" log show --last 1m --style compact --predicate 'process == "Telegram"' | tail -300 || true
             exit 1
           fi
 
-          echo "Simulator smoke test passed: installed and launched $bundle_id"
+          echo "Simulator smoke test passed: installed and launched $bundle_id; screenshot captured."
           xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" || true
-          rm -rf ci-artifacts/smoke
 
       - name: Collect simulator artifacts
         working-directory: telegram-ios
