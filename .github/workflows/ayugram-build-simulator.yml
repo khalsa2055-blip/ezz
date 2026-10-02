@@ -266,8 +266,8 @@ jobs:
           test "$bundle_id" = "org.ayugram.ezz"
 
           main_binary="$app/$executable"
-          lipo -verify_arch arm64 "$main_binary"
-          if lipo -verify_arch x86_64 "$main_binary" >/dev/null 2>&1; then
+          lipo "$main_binary" -verify_arch arm64
+          if lipo "$main_binary" -verify_arch x86_64 >/dev/null 2>&1; then
             echo "Unexpected x86_64 simulator slice detected."
             exit 1
           fi
