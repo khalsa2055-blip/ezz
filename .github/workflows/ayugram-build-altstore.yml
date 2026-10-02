@@ -384,8 +384,8 @@ jobs:
           main_binary="$app/$executable"
           file "$main_binary"
           lipo -info "$main_binary"
-          lipo -verify_arch arm64 "$main_binary"
-          if lipo -verify_arch x86_64 "$main_binary" >/dev/null 2>&1; then
+          lipo "$main_binary" -verify_arch arm64
+          if lipo "$main_binary" -verify_arch x86_64 >/dev/null 2>&1; then
             echo "Unexpected simulator/x86_64 slice detected."
             exit 1
           fi
