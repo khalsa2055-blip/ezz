@@ -152,6 +152,20 @@ jobs:
           PY
           git diff --check
 
+      - name: Fix binary-output decoding in Telegram build helper
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build-system/Make/BuildEnvironment.py")
+          s = p.read_text(encoding="utf-8")
+          old = "    output_string = output_data.decode('utf-8')"
+          new = "    output_string = output_data.decode('utf-8', errors='replace')"
+          if old not in s:
+              raise SystemExit("Expected BuildEnvironment.py decode line was not found")
+          p.write_text(s.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Prepare AltStore-compatible device signing material
         working-directory: telegram-ios
         env:
