@@ -199,6 +199,71 @@ jobs:
             --buildNumber=100001 \
             --configuration=debug_sim_arm64
 
+      - name: Smoke-test app in iPhone Simulator
+        working-directory: telegram-ios
+        run: |
+          set -euo pipefail
+
+          test -d /Applications/Xcode_26.2.app || true
+
+          if xcrun simctl list devices available | grep -q "Booted"; then
+            DEVICE_UDID=$(xcrun simctl list devices available | awk -F '[()]' '/Booted/{print $2; exit}')
+          else
+            DEVICE_UDID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/{print $2; exit}')
+            if [ -z "$DEVICE_UDID" ]; then
+              echo "No available iPhone Simulator device found." >&2
+              xcrun simctl list devices available
+              exit 1
+            fi
+            xcrun simctl boot "$DEVICE_UDID" || true
+            xcrun simctl bootstatus "$DEVICE_UDID" -b
+          fi
+
+          ipa="bazel-bin/Telegram/Telegram.ipa"
+          if [ ! -f "$ipa" ]; then
+            ipa=$(find bazel-bin -type f -name "*.ipa" -print -quit || true)
+          fi
+          test -n "$ipa" && test -f "$ipa"
+
+          rm -rf ci-artifacts/smoke
+          mkdir -p ci-artifacts/smoke
+          unzip -q -o "$ipa" -d ci-artifacts/smoke
+          app=$(find ci-artifacts/smoke/Payload -maxdepth 1 -type d -name "*.app" -print -quit)
+          test -n "$app" && test -d "$app"
+
+          bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
+          test "$bundle_id" = "org.ayugram.ezz"
+
+          main_binary="$app/$executable"
+          lipo -verify_arch arm64 "$main_binary"
+          if lipo -verify_arch x86_64 "$main_binary" >/dev/null 2>&1; then
+            echo "Unexpected x86_64 simulator slice detected."
+            exit 1
+          fi
+
+          xcrun simctl install "$DEVICE_UDID" "$app"
+          xcrun simctl launch "$DEVICE_UDID" "$bundle_id"
+
+          launched=0
+          for _ in $(seq 1 30); do
+            if xcrun simctl spawn "$DEVICE_UDID" launchctl print system 2>/dev/null | grep -q "$bundle_id"; then
+              launched=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$launched" -ne 1 ]; then
+            echo "App did not remain launchable in Simulator." >&2
+            xcrun simctl spawn "$DEVICE_UDID" log show --last 2m --style compact --predicate 'process == "SpringBoard" OR eventMessage CONTAINS[c] "ayugram"' | tail -200 || true
+            exit 1
+          fi
+
+          echo "Simulator smoke test passed: installed and launched $bundle_id"
+          xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" || true
+          rm -rf ci-artifacts/smoke
+
       - name: Collect simulator artifacts
         working-directory: telegram-ios
         run: |
