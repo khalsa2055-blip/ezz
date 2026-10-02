@@ -194,8 +194,13 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -s "$KEYCHAIN_PATH"
 
-          SIGNING_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
-          test -n "$SIGNING_IDENTITY"
+          IDENTITY_LINE=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -E '^[[:space:]]*[0-9]+\)' | head -1 || true)
+          SIGNING_IDENTITY=$(printf '%s\n' "$IDENTITY_LINE" | sed -n 's/.*"\([^"]*\)".*/\1/p')
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "No codesigning identity was found in the temporary keychain." >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
 
           echo "TEAM_ID=$TEAM_ID"
           echo "OLD_BUNDLE_ID=$OLD_BUNDLE_ID"
