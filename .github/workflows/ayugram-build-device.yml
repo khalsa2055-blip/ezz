@@ -2,6 +2,8 @@ name: AyuGram iOS — Build Device (Apple signing required)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -194,7 +196,7 @@ jobs:
             build \
             --configurationPath=build-system/ayugram-ci-configuration.json \
             --xcodeManagedCodesigning \
-            --buildNumber=100002 \
+            --buildNumber=100003 \
             --configuration=debug_arm64
 
       - name: Collect unsigned device IPA
