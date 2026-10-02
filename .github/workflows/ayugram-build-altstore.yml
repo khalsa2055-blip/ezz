@@ -194,11 +194,9 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -s "$KEYCHAIN_PATH"
 
-          IDENTITY_LINE=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -E '^[[:space:]]*[0-9]+\)' | head -1 || true)
-          SIGNING_IDENTITY=$(printf '%s\n' "$IDENTITY_LINE" | sed -n 's/.*"\([^"]*\)".*/\1/p')
+          SIGNING_IDENTITY=$(openssl pkcs12 -in ci-codesigning/certs/SelfSigned.p12 -passin pass: -nokeys -legacy 2>/dev/null | openssl x509 -noout -subject -nameopt oneline,-esc_msb | sed -n 's/.*CN = \([^,]*\).*/\1/p')
           if [ -z "$SIGNING_IDENTITY" ]; then
-            echo "No codesigning identity was found in the temporary keychain." >&2
-            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            echo "Could not extract the signing certificate common name." >&2
             exit 1
           fi
 
