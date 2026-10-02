@@ -2,8 +2,6 @@ name: AyuGram iOS — Build Device (Apple signing required)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 permissions:
   contents: read
@@ -35,6 +33,20 @@ jobs:
           case "$TELEGRAM_API_ID" in
             *[!0-9]*) echo "TELEGRAM_API_ID must be numeric"; exit 1 ;;
           esac
+
+      - name: Validate Apple signing secrets
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CODESIGNING_ZIP_BASE64: ${{ secrets.APPLE_CODESIGNING_ZIP_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+        run: |
+          test -n "$APPLE_TEAM_ID" || { echo "Missing APPLE_TEAM_ID. Add your Apple Developer Team ID in GitHub Secrets."; exit 1; }
+          test -n "$APPLE_CODESIGNING_ZIP_BASE64" || { echo "Missing APPLE_CODESIGNING_ZIP_BASE64. Add the signing bundle secret."; exit 1; }
+          test -n "$APPLE_P12_PASSWORD" || { echo "Missing APPLE_P12_PASSWORD. Add the password for the .p12 certificate."; exit 1; }
+          case "$APPLE_TEAM_ID" in
+            *[!0-9]*) echo "APPLE_TEAM_ID must be numeric"; exit 1 ;;
+          esac
+          echo "Apple signing secrets are present."
 
       - name: Clone Telegram-iOS baseline
         run: |
@@ -153,6 +165,7 @@ jobs:
         env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           python3 - <<'PY'
           import json
@@ -163,7 +176,7 @@ jobs:
           src["bundle_id"] = "org.ayugram.ezz"
           src["api_id"] = os.environ["TELEGRAM_API_ID"]
           src["api_hash"] = os.environ["TELEGRAM_API_HASH"]
-          src["team_id"] = "0000000000"
+          src["team_id"] = os.environ["APPLE_TEAM_ID"]
           src["is_internal_build"] = "true"
           src["is_appstore_build"] = "false"
           Path("build-system/ayugram-ci-configuration.json").write_text(
@@ -172,21 +185,39 @@ jobs:
           )
           PY
 
-      - name: Prepare unsigned device build
+      - name: Prepare Apple signing material
         working-directory: telegram-ios
+        env:
+          APPLE_CODESIGNING_ZIP_BASE64: ${{ secrets.APPLE_CODESIGNING_ZIP_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
         run: |
+          set -e
+          rm -rf "$GITHUB_WORKSPACE/telegram-ios/build-signing"
+          mkdir -p "$GITHUB_WORKSPACE/telegram-ios/build-signing"
           python3 - <<'PY'
+          import base64, os
           from pathlib import Path
-          p = Path("build-system/Make/Make.py")
-          s = p.read_text(encoding="utf-8")
-          needle = "    bazel_command_line.set_custom_target(arguments.target)\n"
-          replacement = needle + "    if arguments.configuration in ('debug_arm64', 'release_arm64', 'debug_sim_arm64', 'release_sim_arm64'):\n        bazel_command_line.set_disable_provisioning_profiles()\n"
-          if needle not in s:
-              raise SystemExit("Make.py build hook not found")
-          if replacement not in s:
-              s = s.replace(needle, replacement, 1)
-          p.write_text(s, encoding="utf-8")
+          data = base64.b64decode(os.environ["APPLE_CODESIGNING_ZIP_BASE64"])
+          Path("/tmp/ayugram-signing.zip").write_bytes(data)
           PY
+          unzip -q -o /tmp/ayugram-signing.zip -d "$GITHUB_WORKSPACE/telegram-ios/build-signing"
+          rm -f /tmp/ayugram-signing.zip
+
+          test -d "$GITHUB_WORKSPACE/telegram-ios/build-signing/profiles"
+          test -d "$GITHUB_WORKSPACE/telegram-ios/build-signing/certs"
+
+          p12=$(find "$GITHUB_WORKSPACE/telegram-ios/build-signing/certs" -type f -name "*.p12" -print -quit)
+          test -n "$p12" || { echo "No .p12 certificate found under certs/."; exit 1; }
+
+          security create-keychain -p "" build-signing.keychain-db
+          security set-keychain-settings -lut 21600 build-signing.keychain-db
+          security unlock-keychain -p "" build-signing.keychain-db
+          security import "$p12" -k build-signing.keychain-db -P "$APPLE_P12_PASSWORD" -A -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s build-signing.keychain-db login.keychain-db
+          security default-keychain -s build-signing.keychain-db
+
+          echo "Signing material prepared."
+          find "$GITHUB_WORKSPACE/telegram-ios/build-signing/profiles" -maxdepth 1 -type f -name "*.mobileprovision" -print | sed 's#^.*/##' | sort
 
       - name: Build AyuGram for iPhone (arm64)
         working-directory: telegram-ios
@@ -195,11 +226,11 @@ jobs:
             --cacheDir="$HOME/telegram-bazel-cache" \
             build \
             --configurationPath=build-system/ayugram-ci-configuration.json \
-            --xcodeManagedCodesigning \
-            --buildNumber=100003 \
+            --codesigningInformationPath="$GITHUB_WORKSPACE/telegram-ios/build-signing" \
+            --buildNumber=100004 \
             --configuration=debug_arm64
 
-      - name: Collect unsigned device IPA
+      - name: Collect signed device IPA
         working-directory: telegram-ios
         run: |
           set -e
@@ -214,7 +245,7 @@ jobs:
             exit 1
           fi
 
-          cp "$ipa" "ci-artifacts/AyuGram-iOS-device-unsigned.ipa"
+          cp "$ipa" "ci-artifacts/AyuGram-iOS-device.ipa"
 
           unzip -q -o "$ipa" -d ci-artifacts/check
           app=$(find ci-artifacts/check/Payload -type d -name "*.app" -print -quit)
@@ -227,6 +258,6 @@ jobs:
       - name: Upload device IPA
         uses: actions/upload-artifact@v4
         with:
-          name: AyuGram-iOS-device-unsigned-${{ github.run_number }}
+          name: AyuGram-iOS-device-${{ github.run_number }}
           path: telegram-ios/ci-artifacts
           if-no-files-found: error
