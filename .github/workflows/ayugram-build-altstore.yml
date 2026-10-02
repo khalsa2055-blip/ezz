@@ -269,6 +269,29 @@ jobs:
               if isinstance(value, str) and value.startswith(prefix):
                   ent["com.apple.developer.ubiquity-kvstore-identifier"] = new_prefix + value[len(prefix):]
 
+              old_group = "group." + old_bundle_id
+              new_group = "group." + bundle_id
+              value = ent.get("com.apple.security.application-groups")
+              if isinstance(value, list):
+                  ent["com.apple.security.application-groups"] = [
+                      new_group + item[len(old_group):]
+                      if isinstance(item, str) and item.startswith(old_group)
+                      else item
+                      for item in value
+                  ]
+
+              old_icloud = "iCloud." + old_bundle_id
+              new_icloud = "iCloud." + bundle_id
+              for key in ("com.apple.developer.icloud-container-identifiers", "com.apple.developer.ubiquity-container-identifiers"):
+                  value = ent.get(key)
+                  if isinstance(value, list):
+                      ent[key] = [
+                          new_icloud + item[len(old_icloud):]
+                          if isinstance(item, str) and item.startswith(old_icloud)
+                          else item
+                          for item in value
+                      ]
+
               profile.pop("DER-Encoded-Profile", None)
 
               with tempfile.NamedTemporaryFile(suffix=".plist", delete=False) as f:
