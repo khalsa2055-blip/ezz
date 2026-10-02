@@ -5,9 +5,17 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '.github/workflows/ayugram-build-simulator.yml'
+      - 'patches/**'
+      - 'AyuGram/**'
+      - 'submodules/**'
 
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-simulator:
@@ -273,24 +281,33 @@ jobs:
           fi
 
           xcrun simctl install "$DEVICE_UDID" "$app"
-          xcrun simctl launch "$DEVICE_UDID" "$bundle_id"
+          set +e
+          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" 2>&1)
+          launch_rc=$?
+          set -e
+          echo "$launch_output"
+          test "$launch_rc" -eq 0 || {
+            echo "simctl launch failed with exit code $launch_rc" >&2
+            xcrun simctl spawn "$DEVICE_UDID" log show --last 3m --style compact --predicate 'eventMessage CONTAINS[c] "Telegram" OR eventMessage CONTAINS[c] "ayugram" OR process == "SpringBoard"' | tail -300 || true
+            exit "$launch_rc"
+          }
 
-          launched=0
+          running=0
           for _ in $(seq 1 30); do
-            if xcrun simctl spawn "$DEVICE_UDID" launchctl print system 2>/dev/null | grep -q "$bundle_id"; then
-              launched=1
+            if xcrun simctl spawn "$DEVICE_UDID" ps -A 2>/dev/null | grep -E '[[:space:]]Telegram([[:space:]]|$)' >/dev/null; then
+              running=1
               break
             fi
             sleep 1
           done
 
-          if [ "$launched" -ne 1 ]; then
-            echo "App did not remain launchable in Simulator." >&2
-            xcrun simctl spawn "$DEVICE_UDID" log show --last 2m --style compact --predicate 'process == "SpringBoard" OR eventMessage CONTAINS[c] "ayugram"' | tail -200 || true
+          if [ "$running" -ne 1 ]; then
+            echo "App launched but Telegram process was not observed running." >&2
+            xcrun simctl spawn "$DEVICE_UDID" log show --last 3m --style compact --predicate 'eventMessage CONTAINS[c] "Telegram" OR eventMessage CONTAINS[c] "ayugram" OR process == "SpringBoard"' | tail -300 || true
             exit 1
           fi
 
-          echo "Simulator smoke test passed: installed and launched $bundle_id"
+          echo "Simulator smoke test passed: installed, launched, and remained running: $bundle_id"
           xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" || true
           rm -rf ci-artifacts/smoke
 
