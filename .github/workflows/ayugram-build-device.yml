@@ -1,11 +1,7 @@
-name: AyuGram iOS — Build Device
+name: AyuGram iOS — Build Device (Apple signing required)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-      - ".github/workflows/ayugram-build-device.yml"
 
 permissions:
   contents: read
