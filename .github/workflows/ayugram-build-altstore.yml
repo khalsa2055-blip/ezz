@@ -357,7 +357,7 @@ jobs:
             build \
             --configurationPath=build-system/ayugram-altstore-configuration.json \
             --codesigningInformationPath=ci-codesigning \
-            --buildNumber=100001 \
+            --buildNumber=$((100000 + GITHUB_RUN_NUMBER)) \
             --configuration=release_arm64 \
             --outputBuildArtifactsPath=ci-artifacts
 
@@ -384,15 +384,68 @@ jobs:
           main_binary="$app/$executable"
           file "$main_binary"
           lipo -info "$main_binary"
-
-          file "$main_binary" | grep -q 'arm64'
-          if file "$main_binary" | grep -q 'x86_64'; then
-            echo "Unexpected simulator/x86_64 binary detected."
+          lipo -verify_arch arm64 "$main_binary"
+          if lipo -verify_arch x86_64 "$main_binary" >/dev/null 2>&1; then
+            echo "Unexpected simulator/x86_64 slice detected."
             exit 1
           fi
 
           codesign --verify --deep --strict "$app"
           security cms -D -i "$app/embedded.mobileprovision" >/dev/null
+
+          python3 - <<'PY'
+          import plistlib
+          import subprocess
+          from pathlib import Path
+
+          app = Path("ci-artifacts/check/Payload").glob("*.app").__next__()
+
+          expected = {
+              "org.ayugram.ezz",
+              "org.ayugram.ezz.BroadcastUpload",
+              "org.ayugram.ezz.SiriIntents",
+              "org.ayugram.ezz.NotificationContent",
+              "org.ayugram.ezz.NotificationService",
+              "org.ayugram.ezz.Share",
+              "org.ayugram.ezz.Widget",
+          }
+
+          bundles = [app] + sorted((app / "PlugIns").glob("*.appex"))
+          seen = set()
+
+          for bundle in bundles:
+              info = plistlib.loads((bundle / "Info.plist").read_bytes())
+              bundle_id = info.get("CFBundleIdentifier")
+              if bundle_id not in expected:
+                  raise SystemExit(f"Unexpected bundle identifier: {bundle_id!r} ({bundle})")
+              seen.add(bundle_id)
+
+              profile = subprocess.check_output(
+                  ["security", "cms", "-D", "-i", str(bundle / "embedded.mobileprovision")]
+              )
+              prof = plistlib.loads(profile)
+              ent = prof.get("Entitlements", {})
+              application_id = ent.get("application-identifier", "")
+              if not application_id.endswith(bundle_id):
+                  raise SystemExit(
+                      f"{bundle}: profile application-identifier {application_id!r} "
+                      f"does not match {bundle_id!r}"
+                  )
+              if ent.get("get-task-allow") is not False:
+                  raise SystemExit(f"{bundle}: get-task-allow is not false")
+              groups = ent.get("com.apple.security.application-groups", [])
+              if groups and groups != ["group.org.ayugram.ezz"]:
+                  raise SystemExit(f"{bundle}: unexpected app groups {groups!r}")
+
+              print(
+                  f"Validated {bundle.relative_to(app.parent)}: "
+                  f"{bundle_id}, profile={application_id}"
+              )
+
+          missing = expected - seen
+          if missing:
+              raise SystemExit(f"Missing expected bundles: {sorted(missing)}")
+          PY
 
           rm -rf ci-artifacts/check
 
