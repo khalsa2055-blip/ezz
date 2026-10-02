@@ -5,9 +5,17 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '.github/workflows/ayugram-build-altstore.yml'
+      - 'patches/**'
+      - 'AyuGram/**'
+      - 'submodules/**'
 
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-altstore:
