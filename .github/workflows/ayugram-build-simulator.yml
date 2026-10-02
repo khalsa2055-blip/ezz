@@ -350,6 +350,13 @@ jobs:
 
           ls -lh ci-artifacts
 
+      - name: Upload simulator screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-iOS-simulator-screenshot-${{ github.run_number }}
+          path: telegram-ios/ci-artifacts/smoke/AyuGram-Simulator.png
+          if-no-files-found: error
+
       - name: Upload simulator artifacts
         uses: actions/upload-artifact@v4
         with:
