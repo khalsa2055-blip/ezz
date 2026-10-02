@@ -205,6 +205,7 @@ jobs:
           echo "SIGNING_IDENTITY=$SIGNING_IDENTITY"
 
           echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          export TEAM_ID OLD_BUNDLE_ID SIGNING_IDENTITY
 
           python3 - <<'PY'
           from pathlib import Path
