@@ -141,7 +141,7 @@ new file mode 100644
 --- /dev/null
 +++ b/submodules/AyuGramIOS/PORT_STATUS.md
 @@ -0,0 +1,34 @@
-+# AyuGram iOS Port Status — 1.3.0
++# AyuGram iOS Port Status — 1.4.0
 +
 +## Implemented
 +- Per-account AyuGram settings persistence
@@ -413,7 +413,7 @@ new file mode 100644
 +import Foundation
 +
 +public enum AyuGramRuntime {
-+    public static let version = "1.3.0"
++    public static let version = "1.4.0"
 +    public static let sourceVersion = "AyuGram Desktop 7.0.9"
 +    private static let settingsLock = NSLock()
 +    private static var settingsStores: [Int64: AyuSettingsStore] = [:]
@@ -1035,7 +1035,7 @@ new file mode 100644
 +    public let desktopOnly: [String]
 +
 +    public init() {
-+        self.version = "1.3.0"
++        self.version = "1.4.0"
 +        self.sourceVersion = "AyuGram Desktop 7.0.9"
 +        self.implemented = [
 +            "GhostModeSettings",
@@ -1634,7 +1634,13 @@ diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessa
 +    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId))
      
      stateManager?.notifyDeletedMessages(messageIds: messageIds.map(\.messageId))
-     
+     @@ -28,7 +28,7 @@
+-        deleteMessagesInteractively(transaction: transaction, stateManager: account.stateManager, postbox: account.postbox, messageIds: messageIds, type: type, removeIfPossiblyDelivered: true)
++        deleteMessagesInteractively(transaction: transaction, stateManager: account.stateManager, postbox: account.postbox, messageIds: messageIds, type: type, removeIfPossiblyDelivered: true, ayuAccountID: account.peerId.toInt64())
+@@ -87,7 +87,7 @@
+-func deleteMessagesInteractively(transaction: Transaction, stateManager: AccountStateManager?, postbox: Postbox, messageIds initialMessageIds: [MessageId], type: InteractiveMessagesDeletionType, deleteAllInGroup: Bool = false, removeIfPossiblyDelivered: Bool) {
++func deleteMessagesInteractively(transaction: Transaction, stateManager: AccountStateManager?, postbox: Postbox, messageIds initialMessageIds: [MessageId], type: InteractiveMessagesDeletionType, deleteAllInGroup: Bool = false, removeIfPossiblyDelivered: Bool, ayuAccountID: Int64? = nil) {
+
 diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift b/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
 --- a/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
 +++ b/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
@@ -1706,10 +1712,9 @@ new file mode 100644
 +    visibility = ["//visibility:public"],
 +)
 diff --git a/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift b/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift
-new file mode 100644
 --- /dev/null
 +++ b/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift
-@@ -0,0 +1,1 @@
+@@ -0,0 +1,360 @@
 +import Foundation
 +import UIKit
 +import Display
@@ -1718,6 +1723,7 @@ new file mode 100644
 +import ItemListUI
 +import PresentationDataUtils
 +import AccountContext
++import Postbox
 +import AyuGramIOS
 +
 +private enum AyuSettingsSection: Int32 {
@@ -1787,44 +1793,7 @@ new file mode 100644
 +    }
 +
 +    static func == (lhs: AyuSettingsEntry, rhs: AyuSettingsEntry) -> Bool {
-+        switch (lhs, rhs) {
-+        case let (.header(a, at), .header(b, bt)):
-+            return a == b && at == bt
-+        case let (.ghost(a), .ghost(b)):
-+            return a == b
-+        case let (.readMessages(a), .readMessages(b)):
-+            return a == b
-+        case let (.readStories(a), .readStories(b)):
-+            return a == b
-+        case let (.online(a), .online(b)):
-+            return a == b
-+        case let (.uploadProgress(a), .uploadProgress(b)):
-+            return a == b
-+        case let (.saveDeleted(a), .saveDeleted(b)):
-+            return a == b
-+        case let (.saveEdited(a), .saveEdited(b)):
-+            return a == b
-+        case let (.filters(a), .filters(b)):
-+            return a == b
-+        case let (.filtersInChats(a), .filtersInChats(b)):
-+            return a == b
-+        case let (.zalgo(a), .zalgo(b)):
-+            return a == b
-+        case let (.messageShot(a), .messageShot(b)):
-+            return a == b
-+        case let (.seconds(a), .seconds(b)):
-+            return a == b
-+        case let (.removeTail(a), .removeTail(b)):
-+            return a == b
-+        case let (.translation(a), .translation(b)):
-+            return a == b
-+        case let (.bubbleRadius(a), .bubbleRadius(b)):
-+            return a == b
-+        case let (.avatarCorners(a), .avatarCorners(b)):
-+            return a == b
-+        default:
-+            return false
-+        }
++        return lhs.stableId == rhs.stableId
 +    }
 +
 +    static func < (lhs: AyuSettingsEntry, rhs: AyuSettingsEntry) -> Bool {
@@ -1834,7 +1803,7 @@ new file mode 100644
 +    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
 +        let arguments = arguments as! AyuSettingsArguments
 +
-+        func toggle(_ title: String, _ value: Bool, _ update: @escaping (inout AyuSettings) -> Void) -> ListViewItem {
++        func toggle(_ title: String, _ value: Bool, _ update: @escaping (inout AyuSettings, Bool) -> Void) -> ListViewItem {
 +            return ItemListSwitchItem(
 +                presentationData: presentationData,
 +                systemStyle: .glass,
@@ -1845,7 +1814,9 @@ new file mode 100644
 +                sectionId: self.section,
 +                style: .blocks,
 +                updated: { newValue in
-+                    arguments.update(update)
++                    arguments.update { settings in
++                        update(&settings, newValue)
++                    }
 +                }
 +            )
 +        }
@@ -1854,43 +1825,43 @@ new file mode 100644
 +        case let .header(_, title):
 +            return ItemListSectionHeaderItem(presentationData: presentationData, text: title, sectionId: self.section)
 +        case let .ghost(value):
-+            return toggle("Ghost Mode", value) { settings in
++            return toggle("Ghost Mode", value) { settings, newValue in
 +                settings.updateGhostSettings(for: arguments.accountID) { ghost in
-+                    ghost.setGhostModeEnabled(!value)
++                    ghost.setGhostModeEnabled(newValue)
 +                }
 +            }
 +        case let .readMessages(value):
-+            return toggle("Send read receipts", value) { settings in
-+                settings.updateGhostSettings(for: arguments.accountID) { $0.sendReadMessages = value }
++            return toggle("Send read receipts", value) { settings, newValue in
++                settings.updateGhostSettings(for: arguments.accountID) { $0.sendReadMessages = newValue }
 +            }
 +        case let .readStories(value):
-+            return toggle("Send story read receipts", value) { settings in
-+                settings.updateGhostSettings(for: arguments.accountID) { $0.sendReadStories = value }
++            return toggle("Send story read receipts", value) { settings, newValue in
++                settings.updateGhostSettings(for: arguments.accountID) { $0.sendReadStories = newValue }
 +            }
 +        case let .online(value):
-+            return toggle("Send online status", value) { settings in
-+                settings.updateGhostSettings(for: arguments.accountID) { $0.sendOnlinePackets = value }
++            return toggle("Send online status", value) { settings, newValue in
++                settings.updateGhostSettings(for: arguments.accountID) { $0.sendOnlinePackets = newValue }
 +            }
 +        case let .uploadProgress(value):
-+            return toggle("Send upload progress", value) { settings in
-+                settings.updateGhostSettings(for: arguments.accountID) { $0.sendUploadProgress = value }
++            return toggle("Send upload progress", value) { settings, newValue in
++                settings.updateGhostSettings(for: arguments.accountID) { $0.sendUploadProgress = newValue }
 +            }
 +        case let .saveDeleted(value):
-+            return toggle("Save deleted messages", value) { $0.saveDeletedMessages = value }
++            return toggle("Save deleted messages", value) { $0.saveDeletedMessages = $1 }
 +        case let .saveEdited(value):
-+            return toggle("Save edit history", value) { $0.saveMessagesHistory = value }
++            return toggle("Save edit history", value) { $0.saveMessagesHistory = $1 }
 +        case let .filters(value):
-+            return toggle("Enable regex filters", value) { $0.filtersEnabled = value }
++            return toggle("Enable regex filters", value) { $0.filtersEnabled = $1 }
 +        case let .filtersInChats(value):
-+            return toggle("Apply filters in chats", value) { $0.filtersEnabledInChats = value }
++            return toggle("Apply filters in chats", value) { $0.filtersEnabledInChats = $1 }
 +        case let .zalgo(value):
-+            return toggle("Filter Zalgo / bidi controls", value) { $0.filterZalgo = value }
++            return toggle("Filter Zalgo / bidi controls", value) { $0.filterZalgo = $1 }
 +        case let .messageShot(value):
-+            return toggle("Show Message Shot", value) { $0.showMessageShot = value }
++            return toggle("Show Message Shot", value) { $0.showMessageShot = $1 }
 +        case let .seconds(value):
-+            return toggle("Show seconds in shots", value) { $0.showMessageSeconds = value }
++            return toggle("Show seconds in shots", value) { $0.showMessageSeconds = $1 }
 +        case let .removeTail(value):
-+            return toggle("Remove message bubble tail", value) { $0.removeMessageTail = value }
++            return toggle("Remove message bubble tail", value) { $0.removeMessageTail = $1 }
 +        case let .translation(value):
 +            let title: String
 +            switch value {
@@ -1915,7 +1886,7 @@ new file mode 100644
 +            return ItemListActionItem(
 +                presentationData: presentationData,
 +                systemStyle: .glass,
-+                title: "Message bubble radius: \(value)",
++                title: "Message bubble radius: (value)",
 +                kind: .generic,
 +                alignment: .natural,
 +                sectionId: self.section,
@@ -1930,7 +1901,7 @@ new file mode 100644
 +            return ItemListActionItem(
 +                presentationData: presentationData,
 +                systemStyle: .glass,
-+                title: "Avatar corners: \(value)",
++                title: "Avatar corners: (value)",
 +                kind: .generic,
 +                alignment: .natural,
 +                sectionId: self.section,
@@ -1945,13 +1916,47 @@ new file mode 100644
 +    }
 +}
 +
-+private extension TranslationProvider {
-+    func next() -> TranslationProvider {
++private enum AyuHistoryEntry: ItemListNodeEntry {
++    case header(String)
++    case item(Int64, String)
++    case empty(String)
++
++    var section: ItemListSectionId { return 0 }
++
++    var stableId: Int64 {
 +        switch self {
-+        case .telegram: return .google
-+        case .google: return .yandex
-+        case .yandex: return .native
-+        case .native: return .telegram
++        case .header:
++            return 0
++        case let .item(id, _):
++            return id
++        case .empty:
++            return 1
++        }
++    }
++
++    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
++        switch (lhs, rhs) {
++        case let (.header(a), .header(b)):
++            return a == b
++        case let (.item(aId, a), .item(bId, b)):
++            return aId == bId && a == b
++        case let (.empty(a), .empty(b)):
++            return a == b
++        default:
++            return false
++        }
++    }
++
++    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
++        return lhs.stableId < rhs.stableId
++    }
++
++    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
++        switch self {
++        case let .header(text):
++            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
++        case let .item(_, text), let .empty(text):
++            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
 +        }
 +    }
 +}
@@ -2031,15 +2036,85 @@ new file mode 100644
 +    return ItemListController(context: context, state: signal)
 +}
 +
++private func ayuHistoryEntries(_ messages: [AyuMessage]) -> [AyuHistoryEntry] {
++    guard !messages.isEmpty else {
++        return [.header("AyuGram History"), .empty("No deleted or edited messages yet.")]
++    }
++
++    let formatter = DateFormatter()
++    formatter.dateStyle = .medium
++    formatter.timeStyle = .short
++
++    var entries: [AyuHistoryEntry] = [.header("AyuGram History")]
++    for message in messages.sorted(by: { $0.fakeID > $1.fakeID }) {
++        let kind = message.isDeleted ? "🧹 Deleted" : "✏️ Edited"
++        let date = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(message.date)))
++        let mediaLabel: String
++        if let mimeType = message.mimeType, !mimeType.isEmpty {
++            mediaLabel = " [(mimeType)]"
++        } else {
++            mediaLabel = ""
++        }
++        let body = message.text.isEmpty ? "(media)(mediaLabel)" : message.text
++        entries.append(.item(message.fakeID, "(kind) • (date)(mediaLabel)
++(body)"))
++    }
++    return entries
++}
++
++public func ayuGramHistoryScreen(context: AccountContext, dialogID: Int64? = nil) -> ViewController {
++    let accountID = context.account.peerId.toInt64()
++
++    let signal = combineLatest(
++        context.sharedContext.presentationData,
++        context.account.postbox.transaction { transaction in
++            AyuGramPostboxHistoryStore.filtered(
++                transaction: transaction,
++                userID: accountID,
++                dialogID: dialogID,
++                kind: .all,
++                limit: 500
++            )
++        }
++    )
++    |> deliverOnMainQueue
++    |> map { presentationData, messages -> (ItemListControllerState, (ItemListNodeState, Any)) in
++        let title = dialogID == nil ? "AyuGram History" : "Group History"
++        let controllerState = ItemListControllerState(
++            presentationData: ItemListPresentationData(presentationData),
++            title: .text(title),
++            leftNavigationButton: nil,
++            rightNavigationButton: nil,
++            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back),
++            animateChanges: false
++        )
++        let listState = ItemListNodeState(
++            presentationData: ItemListPresentationData(presentationData),
++            entries: ayuHistoryEntries(messages),
++            style: .blocks,
++            animateChanges: false
++        )
++        return (controllerState, (listState, NSNull()))
++    }
++
++    return ItemListController(context: context, state: signal)
++}
++
 +public func ayuGramFiltersScreen(context: AccountContext) -> ViewController {
 +    return ayuGramSettingsScreen(context: context)
 +}
 +
-+public func ayuGramHistoryScreen(context: AccountContext, dialogID: Int64? = nil) -> ViewController {
-+    return ayuGramSettingsScreen(context: context)
++private extension TranslationProvider {
++    func next() -> TranslationProvider {
++        switch self {
++        case .telegram: return .google
++        case .google: return .yandex
++        case .yandex: return .native
++        case .native: return .telegram
++        }
++    }
 +}
 +
-
 diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift b/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift
 --- a/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift
 +++ b/submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift
