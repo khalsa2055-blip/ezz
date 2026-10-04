@@ -1867,7 +1867,7 @@ new file mode 100644
 +                action: {
 +                    arguments.context.sharedContext.mainWindow?.present(
 +                        ayuGramHistoryScreen(context: arguments.context),
-+                        in: .window(.root)
++                        on: .root
 +                    )
 +                }
 +            )
