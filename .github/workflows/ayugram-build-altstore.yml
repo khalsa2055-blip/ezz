@@ -26,6 +26,14 @@ jobs:
       - name: Checkout workspace
         uses: actions/checkout@v5
 
+      - name: Restore Bazel build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/telegram-bazel-cache
+          key: ${{ runner.os }}-telegram-bazel-6ad963e5b62d-${{ hashFiles('patches/**') }}
+          restore-keys: |
+            ${{ runner.os }}-telegram-bazel-6ad963e5b62d-
+
       - name: Select Xcode 26.2 when available
         run: |
           if [ -d "/Applications/Xcode_26.2.app" ]; then
