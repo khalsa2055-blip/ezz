@@ -2655,6 +2655,19 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
  
          if isSharedMediaPolls && messages.count == 1 {
              actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.SharedMedia_ViewInChat, icon: { theme in
+@@ -14991,7 +14991,7 @@
+-        if resourceAvailable, !message.containsSecretMedia && !isCopyProtected {
++        if !message.containsSecretMedia && !isCopyProtected {
+             var mediaReference: AnyMediaReference?
+             var isVideo = false
+             for media in message.effectiveMedia {
+                 if let image = media as? TelegramMediaImage, let _ = largestImageRepresentation(image.representations) {
+                     mediaReference = ImageMediaReference.standalone(media: image).abstract
+                     break
+@@ -15003,7 +15003,7 @@
+-                actions.append(.action(ContextMenuActionItem(text: isVideo ? chatPresentationInterfaceState.strings.Gallery_SaveVideo : chatPresentationInterfaceState.strings.Gallery_SaveImage, icon: { theme in
++                actions.append(.action(ContextMenuActionItem(text: "Save As...", icon: { theme in
+
 diff --git a/submodules/TranslateUI/BUILD b/submodules/TranslateUI/BUILD
 --- a/submodules/TranslateUI/BUILD
 +++ b/submodules/TranslateUI/BUILD
