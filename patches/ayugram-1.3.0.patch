@@ -1631,7 +1631,7 @@ diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessa
          }
      }
 -    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId))
-+    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId))
++    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId), ayuAccountID: ayuAccountID ?? stateManager?.accountPeerId.toInt64())
      
      stateManager?.notifyDeletedMessages(messageIds: messageIds.map(\.messageId))
      @@ -28,7 +28,7 @@
