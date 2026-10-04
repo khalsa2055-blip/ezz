@@ -149,6 +149,7 @@ new file mode 100644
 +- Deleted-message capture before Postbox deletion for both direct and interactive deletion paths
 +- Edit-history capture before Postbox replacement for incoming and outgoing message edits
 +- Postbox-native AyuGram history state with duplicate suppression, per-dialog history, and scoped clearing
++- Best-effort local archive of already-downloaded, non-protected media from deleted/edited messages
 +- Regex filter engine and chat history filter gate
 +- Message Shot context-menu action for text and media-only messages
 +- Display-only Zalgo / bidi sanitizer
@@ -179,16 +180,21 @@ diff --git a/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift b/submodu
 new file mode 100644
 --- /dev/null
 +++ b/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,85 @@
 +import Foundation
 +import Postbox
 +
 +/// Entry points used by TelegramCore just before a message is deleted or
-+/// replaced by an edit. The snapshot is created synchronously while the
-+/// Postbox transaction still has the original message, while persistence is
-+/// performed asynchronously so the Telegram transaction is not blocked.
++/// replaced by an edit. Completed local media is copied into an AyuGram-owned
++/// folder so it survives deletion of the original Telegram resource.
 +public enum AyuGramCaptureService {
-+    public static func captureDeleted(transaction: Transaction, messages: [Message], accountID: Int64) {
++    public static func captureDeleted(
++        transaction: Transaction,
++        mediaBox: MediaBox,
++        messages: [Message],
++        mediaCaptures: [AyuMessageMediaCapture],
++        accountID: Int64
++    ) {
 +        guard !messages.isEmpty else {
 +            return
 +        }
@@ -197,27 +203,71 @@ new file mode 100644
 +            return
 +        }
 +
-+        let snapshots = messages.map {
-+            AyuGramPostboxBridge.snapshot(
-+                message: $0,
++        var capturesByMessageID: [Int32: [AyuMediaResourceInfo]] = [:]
++        for capture in mediaCaptures {
++            capturesByMessageID[capture.messageID] = capture.resources
++        }
++
++        let snapshots = messages.map { message -> AyuMessage in
++            var mediaPath: String?
++            var mimeType: String?
++            if let resources = capturesByMessageID[message.id.id], !resources.isEmpty {
++                let archived = AyuGramMediaArchive.archive(
++                    mediaBox: mediaBox,
++                    accountID: accountID,
++                    dialogID: message.id.peerId.toInt64(),
++                    messageID: message.id.id,
++                    resources: resources
++                )
++                mediaPath = archived.path
++                mimeType = archived.mimeType
++            }
++
++            return AyuGramPostboxBridge.snapshot(
++                message: message,
 +                accountID: accountID,
-+                isDeleted: true
++                isDeleted: true,
++                mediaPath: mediaPath,
++                mimeType: mimeType
 +            )
 +        }
 +        _ = AyuGramPostboxHistoryStore.appendDeleted(transaction: transaction, messages: snapshots)
 +    }
 +
-+    public static func captureEdited(transaction: Transaction, message: Message, accountID: Int64, editDate: Int32) {
++    public static func captureEdited(
++        transaction: Transaction,
++        mediaBox: MediaBox,
++        message: Message,
++        mediaCapture: AyuMessageMediaCapture?,
++        accountID: Int64,
++        editDate: Int32
++    ) {
 +        let settingsStore = try? AyuGramRuntime.makeSettingsStore(accountID: accountID)
 +        guard settingsStore?.settings.saveMessagesHistory == true else {
 +            return
++        }
++
++        var mediaPath: String?
++        var mimeType: String?
++        if let mediaCapture, !mediaCapture.resources.isEmpty {
++            let archived = AyuGramMediaArchive.archive(
++                mediaBox: mediaBox,
++                accountID: accountID,
++                dialogID: message.id.peerId.toInt64(),
++                messageID: message.id.id,
++                resources: mediaCapture.resources
++            )
++            mediaPath = archived.path
++            mimeType = archived.mimeType
 +        }
 +
 +        let snapshot = AyuGramPostboxBridge.snapshot(
 +            message: message,
 +            accountID: accountID,
 +            isDeleted: false,
-+            editDate: editDate
++            editDate: editDate,
++            mediaPath: mediaPath,
++            mimeType: mimeType
 +        )
 +        _ = AyuGramPostboxHistoryStore.appendEdited(transaction: transaction, messages: [snapshot])
 +    }
@@ -233,12 +283,34 @@ new file mode 100644
 +/// Adapts Telegram-iOS Postbox.Message to Ayu's portable history model.
 +/// This does not mutate Postbox and is intended to run before a message
 +/// is removed or replaced by a newer revision.
++public struct AyuMediaResourceInfo: Codable, Equatable, Sendable {
++    public let id: String
++    public let mimeType: String?
++
++    public init(id: String, mimeType: String? = nil) {
++        self.id = id
++        self.mimeType = mimeType
++    }
++}
++
++public struct AyuMessageMediaCapture: Codable, Equatable, Sendable {
++    public let messageID: Int32
++    public let resources: [AyuMediaResourceInfo]
++
++    public init(messageID: Int32, resources: [AyuMediaResourceInfo]) {
++        self.messageID = messageID
++        self.resources = resources
++    }
++}
++
 +public enum AyuGramPostboxBridge {
 +    public static func snapshot(
 +        message: Message,
 +        accountID: Int64,
 +        isDeleted: Bool,
-+        editDate: Int32 = 0
++        editDate: Int32 = 0,
++        mediaPath: String? = nil,
++        mimeType: String? = nil
 +    ) -> AyuMessage {
 +        let authorID = message.author?.id.toInt64() ?? 0
 +        return AyuMessage(
@@ -252,12 +324,101 @@ new file mode 100644
 +            date: message.timestamp,
 +            editDate: editDate,
 +            text: message.text,
-+            mediaPath: nil,
-+            mimeType: nil,
++            mediaPath: mediaPath,
++            mimeType: mimeType,
 +            isDeleted: isDeleted
 +        )
 +    }
 +}
+diff --git a/submodules/AyuGramIOS/Sources/AyuGramMediaArchive.swift b/submodules/AyuGramIOS/Sources/AyuGramMediaArchive.swift
+new file mode 100644
+--- /dev/null
++++ b/submodules/AyuGramIOS/Sources/AyuGramMediaArchive.swift
+@@ -0,0 +1,87 @@
++import Foundation
++import Postbox
++
++/// Copies completed, non-protected Telegram media into an AyuGram-owned
++/// history folder before the original message/resource can be removed.
++public enum AyuGramMediaArchive {
++    public static func archive(
++        mediaBox: MediaBox,
++        accountID: Int64,
++        dialogID: Int64,
++        messageID: Int32,
++        resources: [AyuMediaResourceInfo]
++    ) -> (path: String?, mimeType: String?) {
++        guard !resources.isEmpty else {
++            return (nil, nil)
++        }
++
++        guard let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
++            .appendingPathComponent("AyuGram", isDirectory: true)
++            .appendingPathComponent("History", isDirectory: true)
++            .appendingPathComponent(String(accountID), isDirectory: true)
++            .appendingPathComponent(String(dialogID), isDirectory: true)
++            .appendingPathComponent(String(messageID), isDirectory: true) else {
++            return (nil, nil)
++        }
++
++        do {
++            try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
++        } catch {
++            return (nil, nil)
++        }
++
++        var firstPath: String?
++        var firstMimeType: String?
++
++        for (index, resource) in resources.enumerated() {
++            let pathExtension = Self.pathExtension(for: resource.mimeType)
++            guard let sourcePath = mediaBox.completedResourcePath(
++                id: MediaResourceId(resource.id),
++                pathExtension: pathExtension
++            ), FileManager.default.fileExists(atPath: sourcePath) else {
++                continue
++            }
++
++            let sourceExtension = URL(fileURLWithPath: sourcePath).pathExtension
++            let extensionPart = !sourceExtension.isEmpty ? sourceExtension : (pathExtension ?? "bin")
++            let destinationURL = baseURL.appendingPathComponent("(index).(extensionPart)")
++
++            do {
++                if !FileManager.default.fileExists(atPath: destinationURL.path) {
++                    try FileManager.default.copyItem(atPath: sourcePath, toPath: destinationURL.path)
++                }
++                if firstPath == nil {
++                    firstPath = destinationURL.path
++                    firstMimeType = resource.mimeType
++                }
++            } catch {
++                continue
++            }
++        }
++
++        return (firstPath, firstMimeType)
++    }
++
++    private static func pathExtension(for mimeType: String?) -> String? {
++        switch mimeType?.lowercased() {
++        case "image/jpeg":
++            return "jpg"
++        case "image/png":
++            return "png"
++        case "image/webp":
++            return "webp"
++        case "image/gif":
++            return "gif"
++        case "video/mp4":
++            return "mp4"
++        case "video/quicktime":
++            return "mov"
++        default:
++            return nil
++        }
++    }
++}
++
 diff --git a/submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift b/submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift
 new file mode 100644
 --- /dev/null
@@ -1241,9 +1402,32 @@ diff --git a/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.s
 +                   let editedAttribute = message.attributes.compactMap({ $0 as? EditedMessageAttribute }).first,
 +                   !editedAttribute.isHidden,
 +                   (previousMessage.text != message.text || previousMessage.media.count != message.media.count) {
++                    var mediaCapture: AyuMessageMediaCapture?
++                    if !previousMessage.isCopyProtected(), !previousMessage.containsSecretMedia {
++                        var resources: [AyuMediaResourceInfo] = []
++                        for media in previousMessage.effectiveMedia {
++                            if let image = media as? TelegramMediaImage {
++                                for representation in image.representations.sorted(by: {
++                                    Int64($0.dimensions.width) * Int64($0.dimensions.height)
++                                        > Int64($1.dimensions.width) * Int64($1.dimensions.height)
++                                }) {
++                                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
++                                }
++                            } else if let file = media as? TelegramMediaFile {
++                                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
++                            }
++                        }
++                        var seen: Set<String> = []
++                        resources = resources.filter { seen.insert($0.id).inserted }
++                        if !resources.isEmpty {
++                            mediaCapture = AyuMessageMediaCapture(messageID: previousMessage.id.id, resources: resources)
++                        }
++                    }
 +                    AyuGramCaptureService.captureEdited(
 +                        transaction: transaction,
++                        mediaBox: mediaBox,
 +                        message: previousMessage,
++                        mediaCapture: mediaCapture,
 +                        accountID: accountPeerId.toInt64(),
 +                        editDate: max(editedAttribute.date, previousMessage.attributes.compactMap { ($0 as? EditedMessageAttribute)?.date }.max() ?? 0)
 +                    )
@@ -1621,7 +1805,37 @@ diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessa
 +public func _internal_deleteMessages(transaction: Transaction, mediaBox: MediaBox, ids: [MessageId], deleteMedia: Bool = true, manualAddMessageThreadStatsDifference: ((MessageThreadKey, Int, Int) -> Void)? = nil, ayuAccountID: Int64? = nil) {
 +    if let ayuAccountID {
 +        let messages = ids.compactMap { transaction.getMessage($0) }
-+        AyuGramCaptureService.captureDeleted(transaction: transaction, messages: messages, accountID: ayuAccountID)
++        var mediaCaptures: [AyuMessageMediaCapture] = []
++        for message in messages {
++            guard !message.isCopyProtected(), !message.containsSecretMedia else {
++                continue
++            }
++            var resources: [AyuMediaResourceInfo] = []
++            for media in message.effectiveMedia {
++                if let image = media as? TelegramMediaImage {
++                    for representation in image.representations.sorted(by: {
++                        Int64($0.dimensions.width) * Int64($0.dimensions.height)
++                            > Int64($1.dimensions.width) * Int64($1.dimensions.height)
++                    }) {
++                        resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
++                    }
++                } else if let file = media as? TelegramMediaFile {
++                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
++                }
++            }
++            if !resources.isEmpty {
++                var seen: Set<String> = []
++                resources = resources.filter { seen.insert($0.id).inserted }
++                mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))
++            }
++        }
++        AyuGramCaptureService.captureDeleted(
++            transaction: transaction,
++            mediaBox: mediaBox,
++            messages: messages,
++            mediaCaptures: mediaCaptures,
++            accountID: ayuAccountID
++        )
 +    }
 +
      var resourceIds: [MediaResourceId] = []
@@ -2091,12 +2305,14 @@ new file mode 100644
 +        let kind = AyuHistoryDisplay.label(isDeleted: message.isDeleted, settings: settings)
 +        let date = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(message.date)))
 +        let mediaLabel: String
-+        if let mimeType = message.mimeType, !mimeType.isEmpty {
-+            mediaLabel = " [(mimeType)]"
++        if message.mediaPath != nil {
++            mediaLabel = " • Media saved"
++        } else if let mimeType = message.mimeType, !mimeType.isEmpty {
++            mediaLabel = " • \(mimeType)"
 +        } else {
 +            mediaLabel = ""
 +        }
-+        let body = message.text.isEmpty ? "(media)\(mediaLabel)" : message.text
++        let body = message.text.isEmpty ? "(media)\(mediaLabel)" : "\(message.text)\(mediaLabel)"
 +        entries.append(.item(message.fakeID, "\(kind) • \(date)\(mediaLabel)\n\(body)"))
 +    }
 +    return entries
