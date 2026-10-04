@@ -2544,16 +2544,28 @@ diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/Pe
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
-@@ -239,6 +239,9 @@
-     items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 3, text: presentationData.strings.Settings_Appearance, icon: PresentationResourcesSettings.appearance, action: {
-         interaction.openSettings(.appearance)
-     }))
-+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 30, text: "AyuGram", icon: PresentationResourcesSettings.dataAndStorage, action: {
-+        interaction.openSettings(.ayuGram)
-+    }))
-     
-     items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 6, label: .text(data.isPowerSavingEnabled == true ? presentationData.strings.Settings_PowerSavingOn : presentationData.strings.Settings_PowerSavingOff), text: presentationData.strings.Settings_PowerSaving, icon: PresentationResourcesSettings.powerSaving, action: {
-         interaction.openSettings(.powerSaving)
+@@ -15,7 +15,8 @@
+ enum SettingsSection: Int, CaseIterable {
+     case edit
+     case phone
++    case ayuGram
+     case accounts
+     case myProfile
+     case proxy
+     case apps
+@@ -116,6 +117,10 @@
+             items[.phone]!.append(PeerInfoScreenActionItem(id: 2, text: presentationData.strings.Settings_SuggestSetupPasswordAction, action: {
+                 interaction.openSettings(.passwordSetup)
+             }))
+         }
++        
++        items[.ayuGram]!.append(PeerInfoScreenDisclosureItem(id: 30, text: "AyuGram Preferences", icon: UIImage(systemName: "star"), action: {
++            interaction.openSettings(.ayuGram)
++        }))
+         
+         if !settings.accountsAndPeers.isEmpty {
+             for (peerAccountContext, peer, badgeCount) in settings.accountsAndPeers {
+
 diff --git a/submodules/TelegramUI/Sources/AyuMessageShotRenderer.swift b/submodules/TelegramUI/Sources/AyuMessageShotRenderer.swift
 new file mode 100644
 --- /dev/null
