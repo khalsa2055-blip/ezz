@@ -1704,6 +1704,7 @@ new file mode 100644
 +        "//submodules/AccountContext",
 +        "//submodules/Display",
 +        "//submodules/ItemListUI",
++        "//submodules/Postbox:Postbox",
 +        "//submodules/PresentationDataUtils:PresentationDataUtils",
 +        "//submodules/SSignalKit/SwiftSignalKit",
 +        "//submodules/TelegramCore",
