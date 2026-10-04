@@ -1881,12 +1881,12 @@ new file mode 100644
 +                sectionId: self.section,
 +                style: .blocks,
 +                action: {
-+                    arguments.context.account.postbox.transaction { transaction in
++                    _ = (arguments.context.account.postbox.transaction { transaction in
 +                        AyuGramPostboxHistoryStore.clearDeletedForAccount(
 +                            transaction: transaction,
 +                            userID: arguments.accountID
 +                        )
-+                    }.startStandalone()
++                    }.startStandalone())
 +                }
 +            )
 +        case let .filters(value):
