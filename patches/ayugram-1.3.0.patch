@@ -2553,7 +2553,7 @@ diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/Pe
 +        items[.myProfile]!.append(PeerInfoScreenDisclosureItem(id: 30, text: "AyuGram Preferences", icon: UIImage(systemName: "star"), action: {
 +            interaction.openSettings(.ayuGram)
 +        }))
-+        
++
          items[.myProfile]!.append(PeerInfoScreenDisclosureItem(id: 0, text: presentationData.strings.Settings_MyProfile, icon: PresentationResourcesSettings.myProfile, action: {
              interaction.openSettings(.profile)
          }))
