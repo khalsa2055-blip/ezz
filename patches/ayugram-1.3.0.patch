@@ -1712,6 +1712,7 @@ new file mode 100644
 +    visibility = ["//visibility:public"],
 +)
 diff --git a/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift b/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift
+new file mode 100644
 --- /dev/null
 +++ b/submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift
 @@ -0,0 +1,360 @@
