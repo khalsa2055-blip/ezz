@@ -2052,9 +2052,8 @@ new file mode 100644
 +        } else {
 +            mediaLabel = ""
 +        }
-+        let body = message.text.isEmpty ? "(media)(mediaLabel)" : message.text
-+        entries.append(.item(message.fakeID, "(kind) • (date)(mediaLabel)
-+(body)"))
++        let body = message.text.isEmpty ? "(media)\(mediaLabel)" : message.text
++        entries.append(.item(message.fakeID, "\(kind) • \(date)\(mediaLabel)\n\(body)"))
 +    }
 +    return entries
 +}
