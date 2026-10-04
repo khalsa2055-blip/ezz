@@ -1633,8 +1633,8 @@ diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessa
 -func deleteMessagesInteractively(transaction: Transaction, stateManager: AccountStateManager?, postbox: Postbox, messageIds initialMessageIds: [MessageId], type: InteractiveMessagesDeletionType, deleteAllInGroup: Bool = false, removeIfPossiblyDelivered: Bool) {
 +func deleteMessagesInteractively(transaction: Transaction, stateManager: AccountStateManager?, postbox: Postbox, messageIds initialMessageIds: [MessageId], type: InteractiveMessagesDeletionType, deleteAllInGroup: Bool = false, removeIfPossiblyDelivered: Bool, ayuAccountID: Int64? = nil) {
 @@ -151,7 +151,7 @@
--    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\\.messageId))
-+    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\\.messageId), ayuAccountID: ayuAccountID ?? stateManager?.accountPeerId.toInt64())
+-    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId))
++    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId), ayuAccountID: ayuAccountID ?? stateManager?.accountPeerId.toInt64())
 
 diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift b/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
 --- a/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
