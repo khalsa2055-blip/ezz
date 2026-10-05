@@ -27,6 +27,27 @@ for info_plist in plist_paths:
     with info_plist.open("wb") as f:
         plistlib.dump(plist, f, fmt=plistlib.FMT_XML, sort_keys=False)
 
+# Bazel does not package Telegram/Telegram-iOS/Info.plist directly. Its main
+# app Info.plist is generated from the TelegramInfoPlist fragment in Telegram/BUILD.
+# Patch that generator so the final IPA really contains the Files flags.
+build_file = root / "Telegram/BUILD"
+if not build_file.exists():
+    raise SystemExit(f"Missing Telegram BUILD file: {build_file}")
+build_text = build_file.read_text()
+build_old = '''    <key>UIFileSharingEnabled</key>
+    <false/>
+    <key>UILaunchStoryboardName</key>'''
+build_new = '''    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+    <key>UILaunchStoryboardName</key>'''
+if build_old in build_text:
+    build_text = build_text.replace(build_old, build_new, 1)
+elif build_new not in build_text:
+    raise SystemExit("TelegramInfoPlist Files flags anchor not found in Telegram/BUILD")
+build_file.write_text(build_text)
+
 for p in (archive, message, store, capture):
     if not p.exists():
         raise SystemExit(f"Missing AyuGram history source: {p}")
