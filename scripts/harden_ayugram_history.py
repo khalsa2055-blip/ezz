@@ -1,4 +1,5 @@
 from pathlib import Path
+import plistlib
 import re
 
 # This runs after the main AyuGram patch has been applied to Telegram-iOS.
@@ -112,7 +113,9 @@ for p, forbidden_or_required in checks.items():
         if required not in data:
             raise SystemExit(f"History hardening missing: {required}")
 
-print("AyuGram History hardening applied: Documents/AyuGram/History + audio/document MIME support.")
+if plist.get("UIFileSharingEnabled") is not True or plist.get("LSSupportsOpeningDocumentsInPlace") is not True:
+    raise SystemExit("Files app integration flags are not enabled")
+print("AyuGram History hardening applied: Documents/AyuGram/History + media MIME support + Files app integration.")
 
 # Enforce per-dialog History routing and prevent cross-chat leakage.
 ui = root / "submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift"
@@ -167,6 +170,17 @@ if anchor not in smoke_text:
 smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
 
 
+# Expose AyuGram Documents through Files → On My iPhone → AyuGram.
+info_plist = root / "Telegram/Telegram-iOS/Info.plist"
+if not info_plist.exists():
+    raise SystemExit(f"Missing app Info.plist: {info_plist}")
+with info_plist.open("rb") as f:
+    plist = plistlib.load(f)
+plist["UIFileSharingEnabled"] = True
+plist["LSSupportsOpeningDocumentsInPlace"] = True
+with info_plist.open("wb") as f:
+    plistlib.dump(plist, f, fmt=plistlib.FMT_XML, sort_keys=False)
+print("AyuGram Files integration enabled")
 # Add a separate user-controlled Saved folder. History is automatic; Saved is
 # populated only when the user taps the row's real Save action.
 archive_text = archive.read_text()
@@ -371,7 +385,38 @@ if '.appendingPathComponent("Saved", isDirectory: true)' not in archive_text:
 # Add a runtime smoke test proving a media copy really reaches the Saved folder.
 smoke_text = smoke.read_text()
 anchor = '        add("history display labels") {'
-test = '''        add("History → Saved copy") {
+test = '''        add("History → Saved media set") {
+            let dialogID = Int64(9_810_000) + abs(accountID % 100_000)
+            let messageID = Int32(1_710_000_000) + abs(Int32(accountID % 10_000))
+            let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-media-set", isDirectory: true)
+            try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+            let first = tempRoot.appendingPathComponent("0.jpg")
+            let second = tempRoot.appendingPathComponent("1.mp4")
+            try Data("one".utf8).write(to: first, options: .atomic)
+            try Data("two".utf8).write(to: second, options: .atomic)
+
+            let message = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID, peerID: dialogID, fromID: accountID, messageID: messageID, date: Int32(Date().timeIntervalSince1970), text: "AyuGram media-set smoke", mediaPath: first.path, mimeType: "image/jpeg", isDeleted: true)
+            let saved = AyuGramMediaArchive.saveToSaved(message: message)
+            let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("AyuGram", isDirectory: true)
+                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent(String(accountID), isDirectory: true)
+                .appendingPathComponent(String(dialogID), isDirectory: true)
+                .appendingPathComponent(String(messageID), isDirectory: true)
+                .appendingPathComponent("media", isDirectory: true)
+            let firstSaved = savedRoot?.appendingPathComponent("0.jpg")
+            let secondSaved = savedRoot?.appendingPathComponent("1.mp4")
+            let ok = saved
+                && (firstSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (secondSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            if let cleanup = savedRoot?.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() {
+                try? FileManager.default.removeItem(at: cleanup)
+            }
+            return (ok, ok ? "all archived media files copied to Saved/media" : "Saved media set copy failed")
+        }
+        add("History → Saved copy") {
             let dialogID = Int64(9_800_000) + abs(accountID % 100_000)
             let messageID = Int32(1_700_000_000) + abs(Int32(accountID % 10_000))
             let temp = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-smoke-\\(accountID)-\\(messageID).jpg")
