@@ -368,6 +368,13 @@ jobs:
             find "$APP_CONTAINER" -maxdepth 5 -type f \( -name "*Smoke*" -o -name "*Report*.json" \) -print 2>/dev/null | head -100 || true
             exit 1
           fi
+          history_marker=$(find "$APP_CONTAINER" -type f -name "AyuGramHistoryPresented.txt" -print -quit 2>/dev/null || true)
+          if [ -z "$history_marker" ] || [ ! -f "$history_marker" ]; then
+            echo "AyuGramHistoryPresented.txt was not found; History screen did not present." >&2
+            exit 1
+          fi
+          echo "AyuGram History screen presentation confirmed: $history_marker"
+
 
           python3 - "$report" <<'PY'
           import json, sys
