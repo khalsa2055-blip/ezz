@@ -37,6 +37,11 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                 ayuGramHistoryScreen(context: context.context),
                                 on: .root
                             )
+                            if let reportURL {
+                                let historyMarker = reportURL.deletingLastPathComponent().appendingPathComponent("AyuGramHistoryPresented.txt")
+                                try? Data("AyuGram History presented".utf8).write(to: historyMarker, options: .atomic)
+                            }
+
                         })
                     }
 
