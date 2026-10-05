@@ -120,13 +120,20 @@ if not ui.exists():
     raise SystemExit(f"Missing AyuGram History UI source: {ui}")
 ui_text = ui.read_text()
 for required in [
-    'ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())',
-    'public func ayuGramHistoryScreen(context: AccountContext, dialogID: Int64? = nil)',
-    'AyuGramPostboxHistoryStore.filtered(',
-    'dialogID: dialogID,',
+    "public func ayuGramHistoryScreen(context: AccountContext, dialogID: Int64? = nil)",
+    "AyuGramPostboxHistoryStore.filtered(",
+    "dialogID: dialogID,"
 ]:
     if required not in ui_text:
         raise SystemExit(f"Per-dialog History UI contract missing: {required}")
+
+# The context-menu entry lives in TelegramUI, so locate it without assuming
+# the exact controller source file.
+chat_sources = list((root / "submodules/TelegramUI").rglob("*.swift"))
+chat_text = "\n".join(p.read_text() for p in chat_sources)
+if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())" not in chat_text:
+    raise SystemExit("Per-dialog History context-menu routing is missing")
+
 ui_text = ui_text.replace(
     'let title = dialogID == nil ? "AyuGram History" : "Group History"',
     'let title = dialogID == nil ? "AyuGram History" : "History"',
@@ -145,8 +152,8 @@ test = '''        add("per-dialog history isolation") {
             let firstMessage = AyuMessage(fakeID: 0, userID: accountID, dialogID: firstDialog, peerID: firstDialog, fromID: accountID, messageID: messageIDBase + 10, date: Int32(Date().timeIntervalSince1970), text: "AyuGram dialog A", isDeleted: true)
             let secondMessage = AyuMessage(fakeID: 0, userID: accountID, dialogID: secondDialog, peerID: secondDialog, fromID: accountID, messageID: messageIDBase + 11, date: Int32(Date().timeIntervalSince1970), text: "AyuGram dialog B", isDeleted: true)
             _ = AyuGramPostboxHistoryStore.appendDeleted(transaction: transaction, messages: [firstMessage, secondMessage])
-            let firstRows = AyuGramPostboxHistoryStore.deleted(transaction: transaction, userID: accountID, dialogID: firstDialog)
-            let secondRows = AyuGramPostboxHistoryStore.deleted(transaction: transaction, userID: accountID, dialogID: secondDialog)
+            let firstRows = AyuGramPostboxHistoryStore.filtered(transaction: transaction, userID: accountID, dialogID: firstDialog, kind: .deleted, limit: 50)
+            let secondRows = AyuGramPostboxHistoryStore.filtered(transaction: transaction, userID: accountID, dialogID: secondDialog, kind: .deleted, limit: 50)
             let firstOnly = firstRows.contains { $0.text == firstMessage.text } && !firstRows.contains { $0.text == secondMessage.text }
             let secondOnly = secondRows.contains { $0.text == secondMessage.text } && !secondRows.contains { $0.text == firstMessage.text }
             let ok = firstOnly && secondOnly
