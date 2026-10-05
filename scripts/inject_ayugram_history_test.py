@@ -5,6 +5,8 @@ s = p.read_text(encoding="utf-8")
 
 if "import AyuGramIOS" not in s:
     s = s.replace("import UIKit\n", "import UIKit\nimport AyuGramIOS\n", 1)
+if "import AyuGramSettingsScreen" not in s:
+    s = s.replace("import AyuGramIOS\n", "import AyuGramIOS\nimport AyuGramSettingsScreen\n", 1)
 
 anchor = "                    self.mainWindow.viewController = context.rootController\n"
 if anchor not in s:
