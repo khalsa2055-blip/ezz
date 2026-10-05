@@ -43,6 +43,7 @@ hook = """                    self.mainWindow.viewController = context.rootContr
 """
 
 if "-AyuGramFullSmokeTest" not in s:
-    hook = "\n".join(line.rstrip() for line in hook.splitlines()) + "\n"\n    s = s.replace(anchor, hook, 1)
+    hook = "\n".join(line.rstrip() for line in hook.splitlines()) + "\n"
+    s = s.replace(anchor, hook, 1)
 
 p.write_text(s, encoding="utf-8")
