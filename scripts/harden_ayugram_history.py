@@ -409,5 +409,5 @@ test = '''        add("History → Saved copy") {
 '''
 if anchor not in smoke_text:
     raise SystemExit("Smoke test saved-copy anchor missing")
-if "add("History → Saved copy")" not in smoke_text:
+if 'add("History → Saved copy")' not in smoke_text:
     smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
