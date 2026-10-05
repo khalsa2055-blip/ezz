@@ -10,6 +10,7 @@ on:
       - 'patches/**'
       - 'AyuGram/**'
       - 'submodules/**'
+      - 'scripts/**'
 
 permissions:
   contents: read
