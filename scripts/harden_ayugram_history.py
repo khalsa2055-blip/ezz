@@ -11,15 +11,21 @@ store = root / "submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift"
 capture = root / "submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift"
 
 # Enable Files → On My iPhone → AyuGram for the app Documents directory.
-info_plist = root / "Telegram/Telegram-iOS/Info.plist"
-if not info_plist.exists():
-    raise SystemExit(f"Missing app Info.plist: {info_plist}")
-with info_plist.open("rb") as f:
-    plist = plistlib.load(f)
-plist["UIFileSharingEnabled"] = True
-plist["LSSupportsOpeningDocumentsInPlace"] = True
-with info_plist.open("wb") as f:
-    plistlib.dump(plist, f, fmt=plistlib.FMT_XML, sort_keys=False)
+# Telegram-iOS has both the source Info.plist and the Bazel-specific InfoBazel.plist;
+# update both so the final packaged app cannot silently restore UIFileSharingEnabled=false.
+plist_paths = [
+    root / "Telegram/Telegram-iOS/Info.plist",
+    root / "Telegram/Telegram-iOS/InfoBazel.plist",
+]
+for info_plist in plist_paths:
+    if not info_plist.exists():
+        raise SystemExit(f"Missing app Info.plist: {info_plist}")
+    with info_plist.open("rb") as f:
+        plist = plistlib.load(f)
+    plist["UIFileSharingEnabled"] = True
+    plist["LSSupportsOpeningDocumentsInPlace"] = True
+    with info_plist.open("wb") as f:
+        plistlib.dump(plist, f, fmt=plistlib.FMT_XML, sort_keys=False)
 
 for p in (archive, message, store, capture):
     if not p.exists():
@@ -124,8 +130,11 @@ for p, forbidden_or_required in checks.items():
         if required not in data:
             raise SystemExit(f"History hardening missing: {required}")
 
-if plist.get("UIFileSharingEnabled") is not True or plist.get("LSSupportsOpeningDocumentsInPlace") is not True:
-    raise SystemExit("Files app integration flags are not enabled")
+for info_plist in plist_paths:
+    with info_plist.open("rb") as f:
+        checked_plist = plistlib.load(f)
+    if checked_plist.get("UIFileSharingEnabled") is not True or checked_plist.get("LSSupportsOpeningDocumentsInPlace") is not True:
+        raise SystemExit(f"Files app integration flags are not enabled in {info_plist}")
 print("AyuGram History hardening applied: Documents/AyuGram/History + media MIME support + Files app integration.")
 
 # Enforce per-dialog History routing and prevent cross-chat leakage.
