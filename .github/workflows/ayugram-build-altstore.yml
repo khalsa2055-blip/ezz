@@ -168,6 +168,10 @@ jobs:
           PY
           git diff --check
 
+      - name: Harden AyuGram History persistence
+        working-directory: telegram-ios
+        run: python3 "$GITHUB_WORKSPACE/scripts/harden_ayugram_history.py"
+
       - name: Fix binary-output decoding in Telegram build helper
         working-directory: telegram-ios
         run: |
