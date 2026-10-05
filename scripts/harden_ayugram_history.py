@@ -206,7 +206,7 @@ test = '''        add("per-dialog history isolation") {
         }
 
 '''
-test = ''        add("History → Saved media set") {
+test += '''        add("History → Saved media set") {
             let dialogID = Int64(9_810_000) + abs(accountID % 100_000)
             let messageID = Int32(1_710_000_000) + abs(Int32(accountID % 10_000))
             let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-media-set", isDirectory: true)
