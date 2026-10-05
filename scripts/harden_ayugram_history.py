@@ -256,6 +256,35 @@ if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_
 # Turn each History row into a real actionable Save row while keeping the
 # message preview/date/media information visible.
 ui_text = ui.read_text()
+
+history_preview_helper = '''private final class AyuHistoryDocumentPreviewer: NSObject, UIDocumentInteractionControllerDelegate {
+    static let shared = AyuHistoryDocumentPreviewer()
+    private var controller: UIDocumentInteractionController?
+    private weak var presenter: UIViewController?
+
+    func open(path: String) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let roots = UIApplication.shared.connectedScenes.compactMap { scene -> UIViewController? in
+            guard let windowScene = scene as? UIWindowScene else { return nil }
+            return windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        }
+        guard var presenter = roots.first else { return }
+        while let next = presenter.presentedViewController { presenter = next }
+        self.presenter = presenter
+        let controller = UIDocumentInteractionController(url: URL(fileURLWithPath: path))
+        controller.delegate = self
+        self.controller = controller
+        _ = controller.presentPreview(animated: true)
+    }
+
+    func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
+        return presenter ?? UIViewController()
+    }
+}'''
+
+if "private final class AyuHistoryDocumentPreviewer" not in ui_text:
+    ui_text = ui_text.replace("private enum AyuHistoryEntry: ItemListNodeEntry {", history_preview_helper + "\nprivate enum AyuHistoryEntry: ItemListNodeEntry {", 1)
+
 old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
     case header(String)
     case item(Int64, String)
