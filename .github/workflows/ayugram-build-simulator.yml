@@ -45,6 +45,13 @@ jobs:
           xcodebuild -version
           xcode-select -p
 
+      - name: Enable Rosetta for Intel build tools when needed
+        run: |
+          if [ "$(uname -m)" = "arm64" ]; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          uname -m
+
       - name: Validate required Telegram API secrets
         env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
