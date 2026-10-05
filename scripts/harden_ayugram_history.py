@@ -335,157 +335,271 @@ history_preview_helper = '''private final class AyuHistoryDocumentPreviewer: NSO
     func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
         return presenter ?? UIViewController()
     }
-}'''
+}
 
-if "private final class AyuHistoryDocumentPreviewer" not in ui_text:
-    ui_text = ui_text.replace("private enum AyuHistoryEntry: ItemListNodeEntry {", history_preview_helper + "\nprivate enum AyuHistoryEntry: ItemListNodeEntry {", 1)
+private final class AyuHistoryBubbleItem: ListViewItem {
+    let presentationData: ItemListPresentationData
+    let message: AyuMessage
+    let displayText: String
+    let displayDate: String
+    let displayKind: String
 
-old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
-    case header(String)
-    case item(Int64, String)
-    case empty(String)
+    init(presentationData: ItemListPresentationData, message: AyuMessage, displayText: String, displayDate: String, displayKind: String) {
+        self.presentationData = presentationData
+        self.message = message
+        self.displayText = displayText
+        self.displayDate = displayDate
+        self.displayKind = displayKind
+    }
 
-    var section: ItemListSectionId { return 0 }
+    var approximateHeight: CGFloat {
+        return self.message.mediaPath == nil ? 92.0 : 230.0
+    }
 
-    var stableId: Int64 {
-        switch self {
-        case .header:
-            return 0
-        case let .item(id, _):
-            return id
-        case .empty:
-            return 1
+    func nodeConfiguredForParams(
+        async: @escaping (@escaping () -> Void) -> Void,
+        params: ListViewItemLayoutParams,
+        synchronousLoads: Bool,
+        previousItem: ListViewItem?,
+        nextItem: ListViewItem?,
+        completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void
+    ) {
+        async {
+            let node = AyuHistoryBubbleItemNode()
+            let (layout, apply) = node.asyncLayout()(self, params)
+            node.contentSize = layout.contentSize
+            node.insets = layout.insets
+            Queue.mainQueue().async {
+                completion(node, {
+                    return (nil, { _ in apply() })
+                })
+            }
         }
     }
 
-    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.header(a), .header(b)):
-            return a == b
-        case let (.item(aId, a), .item(bId, b)):
-            return aId == bId && a == b
-        case let (.empty(a), .empty(b)):
-            return a == b
-        default:
-            return false
+    func updateNode(
+        async: @escaping (@escaping () -> Void) -> Void,
+        node: @escaping () -> ListViewItemNode,
+        params: ListViewItemLayoutParams,
+        previousItem: ListViewItem?,
+        nextItem: ListViewItem?,
+        animation: ListViewItemUpdateAnimation,
+        completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void
+    ) {
+        async {
+            guard let node = node() as? AyuHistoryBubbleItemNode else {
+                return
+            }
+            let (layout, apply) = node.asyncLayout()(self, params)
+            Queue.mainQueue().async {
+                completion(layout, { _ in apply() })
+            }
         }
     }
+}
 
-    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
+private final class AyuHistoryBubbleItemNode: ListViewItemNode {
+    private let bubbleView = UIView()
+    private let senderLabel = UILabel()
+    private let bodyLabel = UILabel()
+    private let kindLabel = UILabel()
+    private let timeLabel = UILabel()
+    private let mediaView = UIImageView()
+    private let mediaTitleLabel = UILabel()
+    private let saveButton = UIButton(type: .system)
+    private let mediaButton = UIButton(type: .system)
+    private var item: AyuHistoryBubbleItem?
+
+    override init(layerBacked: Bool = false, rotated: Bool = false, seeThrough: Bool = false) {
+        super.init(layerBacked: layerBacked, rotated: rotated, seeThrough: seeThrough)
+        self.bubbleView.layer.cornerRadius = 17.0
+        self.bubbleView.layer.masksToBounds = true
+        self.senderLabel.font = UIFont.systemFont(ofSize: 14.0, weight: .semibold)
+        self.kindLabel.font = UIFont.systemFont(ofSize: 12.0, weight: .medium)
+        self.bodyLabel.font = UIFont.systemFont(ofSize: 16.0)
+        self.bodyLabel.numberOfLines = 0
+        self.timeLabel.font = UIFont.systemFont(ofSize: 11.0)
+        self.timeLabel.textAlignment = .right
+        self.mediaView.layer.cornerRadius = 12.0
+        self.mediaView.layer.masksToBounds = true
+        self.mediaView.contentMode = .scaleAspectFill
+        self.mediaTitleLabel.font = UIFont.systemFont(ofSize: 14.0, weight: .semibold)
+        self.mediaTitleLabel.numberOfLines = 2
+        self.mediaTitleLabel.textAlignment = .center
+        self.saveButton.setTitle("💾", for: .normal)
+        self.saveButton.titleLabel?.font = UIFont.systemFont(ofSize: 17.0)
+        self.saveButton.accessibilityLabel = "Save to Saved"
+        self.mediaButton.accessibilityLabel = "Open media"
+
+        self.view.addSubview(self.bubbleView)
+        self.bubbleView.addSubview(self.senderLabel)
+        self.bubbleView.addSubview(self.kindLabel)
+        self.bubbleView.addSubview(self.bodyLabel)
+        self.bubbleView.addSubview(self.mediaView)
+        self.bubbleView.addSubview(self.mediaTitleLabel)
+        self.bubbleView.addSubview(self.timeLabel)
+        self.bubbleView.addSubview(self.saveButton)
+        self.bubbleView.addSubview(self.mediaButton)
+
+        self.saveButton.addTarget(self, action: #selector(self.savePressed), for: .touchUpInside)
+        self.mediaButton.addTarget(self, action: #selector(self.mediaPressed), for: .touchUpInside)
     }
 
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        switch self {
-        case let .header(text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .item(_, text), let .empty(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        }
-    }
-}'''
-
-new_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
-    case header(String)
-    case message(Int64, String, AyuMessage)
-    case openMedia(Int64, String, AyuMessage)
-    case save(Int64, String, AyuMessage)
-    case empty(String)
-
-    var section: ItemListSectionId { return 0 }
-
-    var stableId: Int64 {
-        switch self {
-        case .header:
-            return 0
-        case let .message(id, _, _):
-            return 1_000_000_000 + id * 10 + 1
-        case let .openMedia(id, _, _):
-            return 1_000_000_000 + id * 10 + 2
-        case let .save(id, _, _):
-            return 1_000_000_000 + id * 10 + 3
-        case .empty:
-            return 1
-        }
-    }
-
-    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.header(a), .header(b)):
-            return a == b
-        case let (.message(aId, a, _), .message(bId, b, _)):
-            return aId == bId && a == b
-        case let (.openMedia(aId, a, _), .openMedia(bId, b, _)):
-            return aId == bId && a == b
-        case let (.save(aId, a, _), .save(bId, b, _)):
-            return aId == bId && a == b
-        case let (.empty(a), .empty(b)):
-            return a == b
-        default:
-            return false
-        }
-    }
-
-    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
-    }
-
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        switch self {
-        case let .header(text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .message(_, text, _):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .openMedia(_, text, message):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: text,
-                kind: .generic,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: {
-                    if let path = message.mediaPath {
-                        AyuHistoryDocumentPreviewer.shared.open(path: path)
-                    }
-                }
+    func asyncLayout() -> (_ item: AyuHistoryBubbleItem, _ params: ListViewItemLayoutParams) -> (ListViewItemNodeLayout, () -> Void) {
+        return { [weak self] item, params in
+            guard let self else {
+                return (ListViewItemNodeLayout(contentSize: CGSize(width: params.width, height: 1.0), insets: UIEdgeInsets()), {})
+            }
+            let bubbleWidth = min(max(params.width - 24.0, 220.0), 360.0)
+            let textWidth = bubbleWidth - 28.0
+            let bodyRect = (item.displayText as NSString).boundingRect(
+                with: CGSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: UIFont.systemFont(ofSize: 16.0)],
+                context: nil
             )
-        case let .save(_, text, message):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: text,
-                kind: .generic,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: {
-                    _ = AyuGramMediaArchive.saveToSaved(message: message)
+            let bodyHeight = max(20.0, ceil(bodyRect.height))
+            let hasMedia = item.message.mediaPath != nil && !item.message.mediaPath!.isEmpty
+            let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
+            let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
+            let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 24.0 + 8.0
+            let layout = ListViewItemNodeLayout(
+                contentSize: CGSize(width: params.width, height: contentHeight),
+                insets: UIEdgeInsets(top: 4.0, left: 0.0, bottom: 4.0, right: 0.0)
+            )
+            return (layout, {
+                self.item = item
+                self.bubbleView.backgroundColor = UIColor.secondarySystemBackground
+                self.senderLabel.textColor = UIColor.label
+                self.kindLabel.textColor = UIColor.systemRed
+                self.bodyLabel.textColor = UIColor.label
+                self.timeLabel.textColor = UIColor.secondaryLabel
+                self.senderLabel.text = "From \\(item.message.fromID)"
+                self.kindLabel.text = item.displayKind
+                self.bodyLabel.text = item.displayText
+                self.timeLabel.text = item.displayDate
+
+                self.bubbleView.frame = CGRect(x: 12.0, y: 4.0, width: bubbleWidth, height: contentHeight - 8.0)
+                self.senderLabel.frame = CGRect(x: 14.0, y: 9.0, width: bubbleWidth - 64.0, height: 18.0)
+                self.kindLabel.frame = CGRect(x: 14.0, y: 29.0, width: bubbleWidth - 28.0, height: 16.0)
+                self.bodyLabel.frame = CGRect(x: 14.0, y: 49.0, width: textWidth, height: bodyHeight)
+
+                if hasMedia, let path = item.message.mediaPath {
+                    self.mediaView.isHidden = false
+                    self.mediaButton.isHidden = false
+                    self.mediaTitleLabel.isHidden = false
+                    self.layoutMedia(path: path, frame: CGRect(x: 14.0, y: 49.0 + bodyHeight + 10.0, width: bubbleWidth - 28.0, height: mediaHeight))
+                } else {
+                    self.mediaView.isHidden = true
+                    self.mediaButton.isHidden = true
+                    self.mediaTitleLabel.isHidden = true
                 }
+
+                let footerY = hasMedia ? 49.0 + bodyHeight + 10.0 + mediaHeight + 6.0 : 49.0 + bodyHeight + 6.0
+                self.timeLabel.frame = CGRect(x: bubbleWidth - 100.0, y: footerY, width: 64.0, height: 20.0)
+                self.saveButton.frame = CGRect(x: bubbleWidth - 38.0, y: footerY - 5.0, width: 30.0, height: 30.0)
+            })
+        }
+    }
+
+    private func layoutMedia(path: String, frame: CGRect) {
+        self.mediaView.frame = frame
+        self.mediaButton.frame = frame
+        self.mediaTitleLabel.frame = frame.insetBy(dx: 18.0, dy: 50.0)
+
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        let mime = self.item?.message.mimeType?.lowercased() ?? ""
+        let isImage = mime.hasPrefix("image/") || ["jpg", "jpeg", "png", "webp", "gif", "heic"].contains(ext)
+
+        if isImage, let image = UIImage(contentsOfFile: path) {
+            self.mediaView.image = image
+            self.mediaView.contentMode = .scaleAspectFill
+            self.mediaView.backgroundColor = .clear
+            self.mediaTitleLabel.text = nil
+        } else {
+            if mime.hasPrefix("video/") || ["mp4", "mov", "m4v"].contains(ext) {
+                self.mediaView.image = UIImage(systemName: "play.circle.fill")
+            } else if mime.hasPrefix("audio/") || ["mp3", "m4a", "aac", "ogg", "wav"].contains(ext) {
+                self.mediaView.image = UIImage(systemName: "waveform.circle.fill")
+            } else {
+                self.mediaView.image = UIImage(systemName: "doc.circle.fill")
+            }
+            self.mediaView.backgroundColor = UIColor.tertiarySystemBackground
+            self.mediaView.tintColor = UIColor.secondaryLabel
+            self.mediaView.contentMode = .center
+            self.mediaTitleLabel.text = URL(fileURLWithPath: path).lastPathComponent
+            self.mediaTitleLabel.textColor = UIColor.label
+        }
+    }
+
+    @objc private func savePressed() {
+        guard let item else { return }
+        if AyuGramMediaArchive.saveToSaved(message: item.message) {
+            self.saveButton.setTitle("✓", for: .normal)
+        }
+    }
+
+    @objc private func mediaPressed() {
+        guard let path = self.item?.message.mediaPath else { return }
+        AyuHistoryDocumentPreviewer.shared.open(path: path)
+    }
+}
+
+private enum AyuHistoryEntry: ItemListNodeEntry {
+    case header(String)
+    case message(Int64, AyuMessage, String, String, String)
+    case empty(String)
+
+    var section: ItemListSectionId { return 0 }
+
+    var stableId: Int64 {
+        switch self {
+        case .header:
+            return 0
+        case let .message(id, _, _, _, _):
+            return 1_000_000_000 + id * 10
+        case .empty:
+            return 1
+        }
+    }
+
+    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        switch (lhs, rhs) {
+        case let (.header(a), .header(b)):
+            return a == b
+        case let (.message(aId, _, aText, aDate, aKind), .message(bId, _, bText, bDate, bKind)):
+            return aId == bId && aText == bText && aDate == bDate && aKind == bKind
+        case let (.empty(a), .empty(b)):
+            return a == b
+        default:
+            return false
+        }
+    }
+
+    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        switch self {
+        case let .header(text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+        case let .message(_, message, body, date, kind):
+            return AyuHistoryBubbleItem(
+                presentationData: presentationData,
+                message: message,
+                displayText: body,
+                displayDate: date,
+                displayKind: kind
             )
         case let .empty(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         }
     }
-}'''
-if old_enum not in ui_text:
-    raise SystemExit("History entry UI anchor missing")
-ui_text = ui_text.replace(old_enum, new_enum, 1)
+}
 
-old_entry_line = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
-        entries.append(.item(message.fakeID, "\\(kind) • \\(date)\\(mediaLabel)\\n\\(body)"))
-'''
-new_entry_line = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
-        entries.append(.message(message.fakeID, "\\(kind) • \\(date)\\n\\(body)", message))
-        if message.mediaPath != nil {
-            entries.append(.openMedia(message.fakeID, "🖼️ Open media", message))
-        }
-        entries.append(.save(message.fakeID, "💾 Save to Saved", message))
-'''
-if old_entry_line not in ui_text:
-    raise SystemExit("History row construction anchor missing")
-ui.write_text(ui_text.replace(old_entry_line, new_entry_line, 1))
+if "AyuHistoryBubbleItem" not in ui_text or "savePressed" not in ui_text or "mediaPressed" not in ui_text:
+    raise SystemExit("Saved Messages-style History bubble UI missing")
 
 # Validate the user-visible Save action and its real storage contract.
 archive_text = archive.read_text()
