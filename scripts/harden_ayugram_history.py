@@ -10,6 +10,17 @@ message = root / "submodules/AyuGramIOS/Sources/MessageHistory.swift"
 store = root / "submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift"
 capture = root / "submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift"
 
+# Enable Files → On My iPhone → AyuGram for the app Documents directory.
+info_plist = root / "Telegram/Telegram-iOS/Info.plist"
+if not info_plist.exists():
+    raise SystemExit(f"Missing app Info.plist: {info_plist}")
+with info_plist.open("rb") as f:
+    plist = plistlib.load(f)
+plist["UIFileSharingEnabled"] = True
+plist["LSSupportsOpeningDocumentsInPlace"] = True
+with info_plist.open("wb") as f:
+    plistlib.dump(plist, f, fmt=plistlib.FMT_XML, sort_keys=False)
+
 for p in (archive, message, store, capture):
     if not p.exists():
         raise SystemExit(f"Missing AyuGram history source: {p}")
@@ -170,17 +181,6 @@ if anchor not in smoke_text:
 smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
 
 
-# Expose AyuGram Documents through Files → On My iPhone → AyuGram.
-info_plist = root / "Telegram/Telegram-iOS/Info.plist"
-if not info_plist.exists():
-    raise SystemExit(f"Missing app Info.plist: {info_plist}")
-with info_plist.open("rb") as f:
-    plist = plistlib.load(f)
-plist["UIFileSharingEnabled"] = True
-plist["LSSupportsOpeningDocumentsInPlace"] = True
-with info_plist.open("wb") as f:
-    plistlib.dump(plist, f, fmt=plistlib.FMT_XML, sort_keys=False)
-print("AyuGram Files integration enabled")
 # Add a separate user-controlled Saved folder. History is automatic; Saved is
 # populated only when the user taps the row's real Save action.
 archive_text = archive.read_text()
