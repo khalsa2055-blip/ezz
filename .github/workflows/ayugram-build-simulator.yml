@@ -349,8 +349,13 @@ jobs:
           # The app writes a machine-readable report inside its sandbox. Require every
           # runtime test to pass before the workflow can pass.
           APP_CONTAINER=$(xcrun simctl get_app_container "$DEVICE_UDID" "$bundle_id" data)
-          report=$(find "$APP_CONTAINER/Library/Application Support/AyuGram" -name "AyuGramSmokeReport.json" -print -quit 2>/dev/null || true)
-          test -n "$report" && test -f "$report"
+          echo "Simulator app data container: $APP_CONTAINER"
+          report=$(find "$APP_CONTAINER" -type f -name "AyuGramSmokeReport.json" -print -quit 2>/dev/null || true)
+          if [ -z "$report" ] || [ ! -f "$report" ]; then
+            echo "AyuGramSmokeReport.json was not found in the simulator app data container." >&2
+            find "$APP_CONTAINER" -maxdepth 5 -type f \( -name "*Smoke*" -o -name "*Report*.json" \) -print 2>/dev/null | head -100 || true
+            exit 1
+          fi
 
           python3 - "$report" <<'PY'
           import json, sys
