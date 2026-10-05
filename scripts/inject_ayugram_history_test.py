@@ -22,7 +22,7 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                         let testReportSignal = context.context.account.postbox.transaction { transaction in
                             AyuGramSmokeTest.run(accountID: accountID, transaction: transaction)
                         }
-                        
+
                         _ = (testReportSignal |> deliverOnMainQueue).start(next: { report in
                             if let reportURL {
                                 do {
@@ -32,7 +32,7 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                     print("AyuGram smoke report write failed: \\(error)")
                                 }
                             }
-                            
+
                             self.mainWindow.present(
                                 ayuGramHistoryScreen(context: context.context),
                                 on: .root
@@ -43,7 +43,6 @@ hook = """                    self.mainWindow.viewController = context.rootContr
 """
 
 if "-AyuGramFullSmokeTest" not in s:
-    hook = "\n".join(line.rstrip() for line in hook.splitlines()) + "\n"
     s = s.replace(anchor, hook, 1)
 
 launch_anchor = "        let launchStartTime = CFAbsoluteTimeGetCurrent()"
@@ -114,43 +113,5 @@ if "AyuGram standalone smoke report written" not in s:
     if launch_anchor not in s:
         raise SystemExit("AppDelegate launch anchor not found")
     s = s.replace(launch_anchor, launch_anchor + "\n" + standalone_hook, 1)
+
 p.write_text(s, encoding="utf-8")
-
-# Add a first-class History button to every group/community info screen.
-peer_info = Path("submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift")
-if not peer_info.exists():
-    raise SystemExit(f"PeerInfo profile source not found: {peer_info}
-")
-peer_text = peer_info.read_text(encoding="utf-8")
-if "import AyuGramSettingsScreen" not in peer_text:
-    peer_text = peer_text.replace("import Foundation\n", "import Foundation\nimport AyuGramSettingsScreen\n", 1)
-
-channel_anchor = "    } else if case let .channel(channel) = data.peer {\n"
-channel_button = """    } else if case let .channel(channel) = data.peer {
-        if case .group = channel.info {
-            items[.peerSettings]!.append(PeerInfoScreenDisclosureItem(id: 98001, text: "AyuGram History", icon: UIImage(systemName: "clock.arrow.circlepath"), action: {
-                guard let controller = interaction.getController() else {
-                    return
-                }
-                controller.push(ayuGramHistoryScreen(context: context, dialogID: channel.id.toInt64()))
-            }))
-        }
-"""
-if channel_anchor in peer_text and "id: 98001, text: \"AyuGram History\"" not in peer_text:
-    peer_text = peer_text.replace(channel_anchor, channel_button, 1)
-
-legacy_anchor = "    } else if case let .legacyGroup(group) = data.peer {\n"
-legacy_button = """    } else if case let .legacyGroup(group) = data.peer {
-        items[.peerSettings]!.append(PeerInfoScreenDisclosureItem(id: 98002, text: "AyuGram History", icon: UIImage(systemName: "clock.arrow.circlepath"), action: {
-            guard let controller = interaction.getController() else {
-                return
-            }
-            controller.push(ayuGramHistoryScreen(context: context, dialogID: group.id.toInt64()))
-        })
-"""
-if legacy_anchor in peer_text and "id: 98002, text: \"AyuGram History\"" not in peer_text:
-    peer_text = peer_text.replace(legacy_anchor, legacy_button, 1)
-
-if "id: 98001, text: \"AyuGram History\"" not in peer_text and "id: 98002, text: \"AyuGram History\"" not in peer_text:
-    raise SystemExit("Could not add AyuGram History to any group info branch")
-peer_info.write_text(peer_text, encoding="utf-8")
