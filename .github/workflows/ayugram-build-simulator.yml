@@ -47,10 +47,15 @@ jobs:
 
       - name: Enable Rosetta for Intel build tools when needed
         run: |
-          if [ "$(uname -m)" = "arm64" ]; then
-            sudo softwareupdate --install-rosetta --agree-to-license
+          translated="$(sysctl -in sysctl.proc_translated 2>/dev/null || echo 0)"
+          arm64_capable="$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)"
+          echo "uname -m: $(uname -m)"
+          echo "sysctl.proc_translated: $translated"
+          echo "hw.optional.arm64: $arm64_capable"
+          if [ "$translated" = "1" ] || [ "$arm64_capable" = "1" ]; then
+            sudo softwareupdate --install-rosetta --agree-to-license || true
           fi
-          uname -m
+          /usr/bin/arch -x86_64 /usr/bin/true
 
       - name: Validate required Telegram API secrets
         env:
