@@ -167,6 +167,10 @@ jobs:
           for path in applied:
               print("  ", path)
           PY
+
+          # Keep the physical-device build aligned with the simulator build.
+          python3 ../scripts/inject_ayugram_history_test.py
+
           git diff --check
 
       - name: Harden AyuGram History persistence
