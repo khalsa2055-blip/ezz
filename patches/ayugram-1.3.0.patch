@@ -3118,7 +3118,7 @@ new file mode 100644
 +        self.startedAt = startedAt
 +        self.finishedAt = finishedAt
 +        self.items = items
-+        self.passed = items.filter(.passed).count
++        self.passed = items.filter { $0.passed }.count
 +        self.failed = items.count - self.passed
 +    }
 +}
