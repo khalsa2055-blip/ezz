@@ -167,7 +167,7 @@ jobs:
               print("  ", path)
           PY
 
-          # Simulator-only History smoke-test hook (UI screenshot test).
+          # Comprehensive AyuGram runtime smoke-test hook (UI + feature verification).
           python3 ../scripts/inject_ayugram_history_test.py
 
           git diff --check
