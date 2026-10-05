@@ -3073,4 +3073,269 @@ new file mode 100644
 +        return result.isEmpty ? nil : result
 +    }
 +}
-
+diff --git a/submodules/AyuGramIOS/Sources/AyuGramSmokeTest.swift b/submodules/AyuGramIOS/Sources/AyuGramSmokeTest.swift
+new file mode 100644
+--- /dev/null
++++ b/submodules/AyuGramIOS/Sources/AyuGramSmokeTest.swift
+@@ -0,0 +1,238 @@
++import Foundation
++import Postbox
++
++public struct AyuGramSmokeTestItem: Codable, Sendable {
++    public let name: String
++    public let passed: Bool
++    public let details: String
++
++    public init(name: String, passed: Bool, details: String) {
++        self.name = name
++        self.passed = passed
++        self.details = details
++    }
++}
++
++public struct AyuGramSmokeTestReport: Codable, Sendable {
++    public let version: String
++    public let accountID: Int64
++    public let startedAt: Int64
++    public let finishedAt: Int64
++    public let items: [AyuGramSmokeTestItem]
++    public let passed: Int
++    public let failed: Int
++
++    public var allPassed: Bool {
++        failed == 0
++    }
++
++    public init(
++        version: String,
++        accountID: Int64,
++        startedAt: Int64,
++        finishedAt: Int64,
++        items: [AyuGramSmokeTestItem]
++    ) {
++        self.version = version
++        self.accountID = accountID
++        self.startedAt = startedAt
++        self.finishedAt = finishedAt
++        self.items = items
++        self.passed = items.filter(.passed).count
++        self.failed = items.count - self.passed
++    }
++}
++
++/// Runtime smoke tests for the AyuGram iOS feature groups that can be validated
++/// without a real Telegram account or external provider credentials.
++///
++/// These tests exercise the actual settings store, Ghost Mode policy/gate,
++/// Postbox history, regex engine, display sanitizer, and message-shot/translation
++/// configuration types used by the shipped code.
++public enum AyuGramSmokeTest {
++    public static func run(accountID: Int64, transaction: Transaction) -> AyuGramSmokeTestReport {
++        let startedAt = Int64(Date().timeIntervalSince1970 * 1000.0)
++        var items: [AyuGramSmokeTestItem] = []
++
++        func add(_ name: String, _ body: () throws -> (Bool, String)) {
++            do {
++                let result = try body()
++                items.append(AyuGramSmokeTestItem(name: name, passed: result.0, details: result.1))
++            } catch {
++                items.append(AyuGramSmokeTestItem(name: name, passed: false, details: String(describing: error)))
++            }
++        }
++
++        add("settings persistence") {
++            let store = try AyuGramRuntime.cachedSettingsStore(accountID: accountID)
++            let original = store.settings
++            try store.update { settings in
++                settings.saveDeletedMessages = false
++                settings.saveMessagesHistory = false
++                settings.translationProvider = .google
++                settings.messageShot.showDate = true
++            }
++            let saved = store.settings
++            try store.update { $0 = original }
++            let ok = !saved.saveDeletedMessages
++                && !saved.saveMessagesHistory
++                && saved.translationProvider == .google
++                && saved.messageShot.showDate
++            return (ok, ok ? "round-trip persisted and restored" : "settings round-trip mismatch")
++        }
++
++        add("Ghost Mode policy") {
++            var settings = GhostModeSettings()
++            settings.sendWithoutSound = .inGhostMode
++            settings.setGhostModeEnabled(true)
++            let policy = GhostModePolicy(settings: settings)
++            let ok = settings.isGhostModeActive
++                && !policy.shouldSend(.readMessages)
++                && !policy.shouldSend(.readStories)
++                && !policy.shouldSend(.onlineStatus)
++                && !policy.shouldSend(.uploadProgress)
++                && policy.shouldSend(.offlineStatus)
++                && settings.shouldSendWithoutSound
++            return (ok, ok ? "all five packet gates match Ghost Mode" : "Ghost Mode policy mismatch")
++        }
++
++        add("Ghost Mode runtime gate") {
++            let store = try AyuGramRuntime.cachedSettingsStore(accountID: accountID)
++            let original = store.settings
++            try store.update { settings in
++                settings.updateGhostSettings(for: accountID) { ghost in
++                    ghost.setGhostModeEnabled(true)
++                }
++            }
++            let blockedRead = !AyuGramGhostGate.shouldSend(.readMessages, accountID: accountID)
++            let blockedOnline = !AyuGramGhostGate.shouldSend(.onlineStatus, accountID: accountID)
++            try store.update { $0 = original }
++            let ok = blockedRead && blockedOnline
++            return (ok, ok ? "runtime gate blocks read and presence packets" : "runtime gate did not block expected packets")
++        }
++
++        add("regex filters") {
++            let normal = RegexFilter(text: "secret", caseInsensitive: true)
++            let reversed = RegexFilter(text: "^hello$", reversed: true)
++            let dialog = RegexFilter(text: "dialog-only", dialogID: 77)
++            let engine = RegexFilterEngine(filters: [normal, reversed, dialog])
++            let excluded = RegexFilterExclusion(dialogID: 55, filterID: normal.id)
++            engine.replace(filters: [normal, reversed, dialog], exclusions: [excluded])
++
++            let ok = engine.isFiltered(text: "MY SECRET", dialogID: 1)
++                && !engine.isFiltered(text: "MY SECRET", dialogID: 55)
++                && engine.isFiltered(text: "goodbye", dialogID: 1)
++                && engine.isFiltered(text: "dialog-only", dialogID: 77)
++                && !engine.isFiltered(text: "dialog-only", dialogID: 78)
++            return (ok, ok ? "normal, reversed, per-dialog, case-insensitive and exclusion rules passed" : "regex rule mismatch")
++        }
++
++        add("Zalgo / bidi sanitizer") {
++            let input = "Safe\u{202E}text e\u{0301}\u{0301}\u{0301}\u{0301}"
++            let output = AyuTextSanitizer.filterZalgo(input)
++            let ok = !output.contains("\u{202E}") && output.contains("Safe") && output.contains("text")
++            return (ok, ok ? "bidi control removed and base text retained" : "sanitizer mismatch")
++        }
++
++        add("message-shot settings") {
++            var settings = MessageShotSettings()
++            settings.showBackground = false
++            settings.showDate = true
++            settings.showReactions = true
++            let data = try JSONEncoder().encode(settings)
++            let decoded = try JSONDecoder().decode(MessageShotSettings.self, from: data)
++            let ok = decoded == settings
++            return (ok, ok ? "Message Shot settings Codable round-trip passed" : "Message Shot settings mismatch")
++        }
++
++        add("translation provider selector") {
++            let store = try AyuGramRuntime.cachedSettingsStore(accountID: accountID)
++            let original = store.settings
++            try store.update { $0.translationProvider = .google }
++            let google = store.settings.translationProvider == .google
++            try store.update { $0.translationProvider = .yandex }
++            let yandex = store.settings.translationProvider == .yandex
++            try store.update { $0 = original }
++            let ok = google && yandex
++            return (ok, ok ? "Google and Yandex selectors persist correctly" : "translation provider selector mismatch")
++        }
++
++        add("history store") {
++            let dialogID = Int64(9_700_000) + abs(accountID % 100_000)
++            let messageIDBase = Int32(1_900_000_000) + abs(Int32(accountID % 10_000))
++            let deleted = AyuMessage(
++                fakeID: 0,
++                userID: accountID,
++                dialogID: dialogID,
++                peerID: dialogID,
++                fromID: accountID,
++                messageID: messageIDBase,
++                date: Int32(Date().timeIntervalSince1970) - 60,
++                text: "AyuGram smoke test deleted message",
++                isDeleted: true
++            )
++            let edited = AyuMessage(
++                fakeID: 0,
++                userID: accountID,
++                dialogID: dialogID,
++                peerID: dialogID,
++                fromID: accountID,
++                messageID: messageIDBase + 1,
++                date: Int32(Date().timeIntervalSince1970) - 30,
++                editDate: Int32(Date().timeIntervalSince1970) - 5,
++                text: "AyuGram smoke test edited message",
++                isDeleted: false
++            )
++            let media = AyuMessage(
++                fakeID: 0,
++                userID: accountID,
++                dialogID: dialogID,
++                peerID: dialogID,
++                fromID: accountID,
++                messageID: messageIDBase + 2,
++                date: Int32(Date().timeIntervalSince1970) - 15,
++                text: "AyuGram smoke test media",
++                mediaPath: "/tmp/ayugram-smoke-image.jpg",
++                mimeType: "image/jpeg",
++                isDeleted: true
++            )
++
++            _ = AyuGramPostboxHistoryStore.appendDeleted(transaction: transaction, messages: [deleted, media])
++            _ = AyuGramPostboxHistoryStore.appendEdited(transaction: transaction, messages: [edited])
++
++            let all = AyuGramPostboxHistoryStore.filtered(
++                transaction: transaction,
++                userID: accountID,
++                dialogID: dialogID,
++                kind: .all,
++                limit: 50
++            )
++            let deletedRows = AyuGramPostboxHistoryStore.filtered(
++                transaction: transaction,
++                userID: accountID,
++                dialogID: dialogID,
++                kind: .deleted,
++                limit: 50
++            )
++            let editedRows = AyuGramPostboxHistoryStore.filtered(
++                transaction: transaction,
++                userID: accountID,
++                dialogID: dialogID,
++                kind: .edited,
++                limit: 50
++            )
++            let deletedHit = deletedRows.contains { $0.text == deleted.text && $0.isDeleted }
++            let editedHit = editedRows.contains { $0.text == edited.text && !$0.isDeleted }
++            let mediaHit = all.contains { $0.text == media.text && $0.mediaPath == media.mediaPath && $0.mimeType == media.mimeType }
++            let ok = deletedHit && editedHit && mediaHit
++            return (ok, ok ? "deleted, edited and media metadata round-tripped through Postbox" : "history round-trip mismatch")
++        }
++
++        add("history display labels") {
++            var settings = AyuSettings()
++            settings.deletedMark = "🧹"
++            settings.editedMark = "✏️"
++            let deletedLabel = AyuHistoryDisplay.label(isDeleted: true, settings: settings)
++            let editedLabel = AyuHistoryDisplay.label(isDeleted: false, settings: settings)
++            let ok = deletedLabel == "🧹" && editedLabel == "✏️"
++            return (ok, ok ? "custom Deleted and Edited marks render correctly" : "history labels mismatch")
++        }
++
++        add("account isolation") {
++            let otherID = accountID + 1_000_000
++            let first = try AyuGramRuntime.cachedSettingsStore(accountID: accountID)
++            let other = try AyuGramRuntime.cachedSettingsStore(accountID: otherID)
++            let original = other.settings
++            try other.update { $0.saveDeletedMessages = false }
++            let firstUnaffected = first.settings.saveDeletedMessages
++            try other.update { $0 = original }
++            return (firstUnaffected, firstUnaffected ? "per-account stores remain isolated" : "account settings leaked across accounts")
++        }
++
++        let finishedAt = Int64(Date().timeIntervalSince1970 * 1000.0)
++        return AyuGramSmokeTestReport(
++            version: AyuGramRuntime.version,
++            accountID: accountID,
++            startedAt: startedAt,
++            finishedAt: finishedAt,
++            items: items
++        )
++    }
++}
