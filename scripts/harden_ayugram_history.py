@@ -258,6 +258,51 @@ if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_
 ui_text = ui.read_text()
 old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
     case header(String)
+    case item(Int64, String)
+    case empty(String)
+
+    var section: ItemListSectionId { return 0 }
+
+    var stableId: Int64 {
+        switch self {
+        case .header:
+            return 0
+        case let .item(id, _):
+            return id
+        case .empty:
+            return 1
+        }
+    }
+
+    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        switch (lhs, rhs) {
+        case let (.header(a), .header(b)):
+            return a == b
+        case let (.item(aId, a), .item(bId, b)):
+            return aId == bId && a == b
+        case let (.empty(a), .empty(b)):
+            return a == b
+        default:
+            return false
+        }
+    }
+
+    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        switch self {
+        case let .header(text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+        case let .item(_, text), let .empty(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        }
+    }
+}'''
+
+new_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
+    case header(String)
     case message(Int64, String, AyuMessage)
     case openMedia(Int64, String, AyuMessage)
     case save(Int64, String, AyuMessage)
@@ -323,63 +368,6 @@ old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
                 }
             )
         case let .save(_, text, message):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: text,
-                kind: .generic,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: {
-                    _ = AyuGramMediaArchive.saveToSaved(message: message)
-                }
-            )
-        case let .empty(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        }
-    }
-}'''
-new_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
-    case header(String)
-    case item(Int64, String, AyuMessage)
-    case empty(String)
-
-    var section: ItemListSectionId { return 0 }
-
-    var stableId: Int64 {
-        switch self {
-        case .header:
-            return 0
-        case let .item(id, _, _):
-            return id
-        case .empty:
-            return 1
-        }
-    }
-
-    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.header(a), .header(b)):
-            return a == b
-        case let (.item(aId, a, _), .item(bId, b, _)):
-            return aId == bId && a == b
-        case let (.empty(a), .empty(b)):
-            return a == b
-        default:
-            return false
-        }
-    }
-
-    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
-    }
-
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        switch self {
-        case let .header(text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .item(_, text, message):
             return ItemListActionItem(
                 presentationData: presentationData,
                 systemStyle: .glass,
