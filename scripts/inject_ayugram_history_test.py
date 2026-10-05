@@ -14,46 +14,38 @@ if anchor not in s:
 
 hook = """                    self.mainWindow.viewController = context.rootController
 
-                    if ProcessInfo.processInfo.arguments.contains("-AyuGramHistoryTest") {
+                    if ProcessInfo.processInfo.arguments.contains("-AyuGramFullSmokeTest") {
                         let accountID = context.context.account.peerId.toInt64()
-                        let now = Int32(Date().timeIntervalSince1970)
-                        _ = (context.context.account.postbox.transaction { transaction in
-                            let deleted = AyuMessage(
-                                fakeID: 0,
-                                userID: accountID,
-                                dialogID: 0,
-                                peerID: 0,
-                                fromID: accountID,
-                                messageID: 100001,
-                                date: now - 60,
-                                text: "AyuGram History test — deleted message",
-                                isDeleted: true
-                            )
-                            let edited = AyuMessage(
-                                fakeID: 0,
-                                userID: accountID,
-                                dialogID: 0,
-                                peerID: 0,
-                                fromID: accountID,
-                                messageID: 100002,
-                                date: now - 30,
-                                editDate: now - 5,
-                                text: "AyuGram History test — edited message",
-                                isDeleted: false
-                            )
-                            _ = AyuGramPostboxHistoryStore.appendDeleted(transaction: transaction, messages: [deleted])
-                            _ = AyuGramPostboxHistoryStore.appendEdited(transaction: transaction, messages: [edited])
-                        }.startStandalone())
+                        let reportURL = (try? AyuGramRuntime.baseDirectory(accountID: accountID))?
+                            .appendingPathComponent("AyuGramSmokeReport.json")
 
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        _ = (context.context.account.postbox.transaction { transaction in
+                            AyuGramSmokeTest.run(accountID: accountID, transaction: transaction)
+                        }.startStandalone())
+                        
+                        let testReportSignal = context.context.account.postbox.transaction { transaction in
+                            AyuGramSmokeTest.run(accountID: accountID, transaction: transaction)
+                        }
+                        
+                        _ = (testReportSignal |> deliverOnMainQueue).start(next: { report in
+                            if let reportURL {
+                                do {
+                                    let data = try JSONEncoder().encode(report)
+                                    try data.write(to: reportURL, options: .atomic)
+                                } catch {
+                                    print("AyuGram smoke report write failed: (error)")
+                                }
+                            }
+                            
                             self.mainWindow.present(
                                 ayuGramHistoryScreen(context: context.context),
                                 on: .root
                             )
-                        }
+                        })
                     }
 
 """
+
 if "-AyuGramHistoryTest" not in s:
     s = s.replace(anchor, hook, 1)
 
