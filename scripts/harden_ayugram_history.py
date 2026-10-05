@@ -258,7 +258,9 @@ if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_
 ui_text = ui.read_text()
 old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
     case header(String)
-    case item(Int64, String)
+    case message(Int64, String, AyuMessage)
+    case openMedia(Int64, String, AyuMessage)
+    case save(Int64, String, AyuMessage)
     case empty(String)
 
     var section: ItemListSectionId { return 0 }
@@ -267,8 +269,12 @@ old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
         switch self {
         case .header:
             return 0
-        case let .item(id, _):
-            return id
+        case let .message(id, _, _):
+            return 1_000_000_000 + id * 10 + 1
+        case let .openMedia(id, _, _):
+            return 1_000_000_000 + id * 10 + 2
+        case let .save(id, _, _):
+            return 1_000_000_000 + id * 10 + 3
         case .empty:
             return 1
         }
@@ -278,7 +284,11 @@ old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
         switch (lhs, rhs) {
         case let (.header(a), .header(b)):
             return a == b
-        case let (.item(aId, a), .item(bId, b)):
+        case let (.message(aId, a, _), .message(bId, b, _)):
+            return aId == bId && a == b
+        case let (.openMedia(aId, a, _), .openMedia(bId, b, _)):
+            return aId == bId && a == b
+        case let (.save(aId, a, _), .save(bId, b, _)):
             return aId == bId && a == b
         case let (.empty(a), .empty(b)):
             return a == b
@@ -295,7 +305,37 @@ old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
         switch self {
         case let .header(text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .item(_, text), let .empty(text):
+        case let .message(_, text, _):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        case let .openMedia(_, text, message):
+            return ItemListActionItem(
+                presentationData: presentationData,
+                systemStyle: .glass,
+                title: text,
+                kind: .generic,
+                alignment: .natural,
+                sectionId: self.section,
+                style: .blocks,
+                action: {
+                    if let path = message.mediaPath {
+                        AyuHistoryDocumentPreviewer.shared.open(path: path)
+                    }
+                }
+            )
+        case let .save(_, text, message):
+            return ItemListActionItem(
+                presentationData: presentationData,
+                systemStyle: .glass,
+                title: text,
+                kind: .generic,
+                alignment: .natural,
+                sectionId: self.section,
+                style: .blocks,
+                action: {
+                    _ = AyuGramMediaArchive.saveToSaved(message: message)
+                }
+            )
+        case let .empty(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         }
     }
@@ -365,8 +405,11 @@ old_entry_line = '''        let body = message.text.isEmpty ? "(media)\\(mediaLa
         entries.append(.item(message.fakeID, "\\(kind) • \\(date)\\(mediaLabel)\\n\\(body)"))
 '''
 new_entry_line = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
-        let preview = "\\(kind) • \\(date)\\n\\(body)\\n💾 Save"
-        entries.append(.item(message.fakeID, preview, message))
+        entries.append(.message(message.fakeID, "\\(kind) • \\(date)\\n\\(body)", message))
+        if message.mediaPath != nil {
+            entries.append(.openMedia(message.fakeID, "🖼️ Open media", message))
+        }
+        entries.append(.save(message.fakeID, "💾 Save to Saved", message))
 '''
 if old_entry_line not in ui_text:
     raise SystemExit("History row construction anchor missing")
