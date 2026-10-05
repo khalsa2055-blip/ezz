@@ -217,6 +217,10 @@ jobs:
               raise SystemExit("Expected BuildEnvironment.py decode line was not found")
           PY
 
+      - name: Harden AyuGram History persistence
+        working-directory: telegram-ios
+        run: python3 "$GITHUB_WORKSPACE/scripts/harden_ayugram_history.py"
+
       - name: Create simulator build configuration
         working-directory: telegram-ios
         env:
