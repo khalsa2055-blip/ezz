@@ -147,8 +147,8 @@ if not smoke.exists():
 smoke_text = smoke.read_text()
 anchor = '        add("history display labels") {'
 test = '''        add("per-dialog history isolation") {
-            let firstDialog = dialogID
-            let secondDialog = dialogID + 777
+            let firstDialog: Int64 = 900_000_000 + Int64(abs(accountID % 10_000))
+            let secondDialog = firstDialog + 777
             let isolationMessageIDBase = Int32(1_800_000_000) + abs(Int32(accountID % 10_000))
             let firstMessage = AyuMessage(fakeID: 0, userID: accountID, dialogID: firstDialog, peerID: firstDialog, fromID: accountID, messageID: isolationMessageIDBase + 10, date: Int32(Date().timeIntervalSince1970), text: "AyuGram dialog A", isDeleted: true)
             let secondMessage = AyuMessage(fakeID: 0, userID: accountID, dialogID: secondDialog, peerID: secondDialog, fromID: accountID, messageID: isolationMessageIDBase + 11, date: Int32(Date().timeIntervalSince1970), text: "AyuGram dialog B", isDeleted: true)
