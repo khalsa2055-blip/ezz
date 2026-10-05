@@ -172,6 +172,36 @@ jobs:
 
           git diff --check
 
+      - name: Verify AyuGram feature integrations
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          patch_files = list(Path("submodules").rglob("*.swift"))
+          text = "\\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in patch_files)
+
+          required = {
+              "Ghost Mode packet gate": "AyuGramGhostGate.shouldSend",
+              "Deleted-message capture": "AyuGramCaptureService.captureDeleted",
+              "Edit-history capture": "AyuGramCaptureService.captureEdited",
+              "Regex filter gate": "AyuGramRuntime.shouldFilterMessage",
+              "Media archive": "AyuGramMediaArchive.archive",
+              "Postbox history": "AyuGramPostboxHistoryStore",
+              "Message Shot renderer": "AyuMessageShotRenderer.render",
+              "Zalgo/bidi sanitizer": "AyuTextSanitizer.filterZalgo",
+              "Translation service": "class AyuGramTranslationService",
+              "AyuGram Settings": "AyuGram Preferences",
+              "History screen": "View AyuGram History",
+          }
+
+          missing = [name for name, marker in required.items() if marker not in text]
+          if missing:
+              raise SystemExit("Missing AyuGram integrations: " + ", ".join(missing))
+
+          print("Verified AyuGram integrations:", len(required))
+          PY
+
       - name: Fix binary-output decoding in Telegram build helper
         working-directory: telegram-ios
         run: |
@@ -294,7 +324,7 @@ jobs:
 
           xcrun simctl install "$DEVICE_UDID" "$app"
           set +e
-          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryTest 2>&1)
+          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramFullSmokeTest 2>&1)
           launch_rc=$?
           set -e
           echo "$launch_output"
@@ -308,11 +338,31 @@ jobs:
           # ps inside the simulator does not consistently expose third-party process names.
           echo "Simulator launch succeeded: $launch_output"
 
-          sleep 10
+          # Give the app time to finish the smoke tests and present AyuGram History.
+          sleep 12
 
-          # Capture a real screenshot from the running Simulator UI so the artifact can
-          # be visually inspected after the workflow completes.
+          # The app writes a machine-readable report inside its sandbox. Require every
+          # runtime test to pass before the workflow can pass.
+          APP_CONTAINER=$(xcrun simctl get_app_container "$DEVICE_UDID" "$bundle_id" data)
+          report=$(find "$APP_CONTAINER/Library/Application Support/AyuGram" -name "AyuGramSmokeReport.json" -print -quit 2>/dev/null || true)
+          test -n "$report" && test -f "$report"
+
+          python3 - "$report" <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          if report.get("failed") != 0 or not report.get("items") or report.get("passed") != len(report["items"]):
+              raise SystemExit("AyuGram comprehensive smoke test FAILED")
+          print(f"AyuGram comprehensive smoke test PASSED: {report['passed']} checks")
+          PY
+
           mkdir -p ci-artifacts/smoke
+          cp "$report" ci-artifacts/smoke/AyuGramSmokeReport.json
+
+          # Capture a real screenshot from the running Simulator UI so the actual History
+          # screen (including Deleted/Edited test entries) can be visually inspected.
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-Simulator.png
           test -s ci-artifacts/smoke/AyuGram-Simulator.png
 
@@ -324,7 +374,7 @@ jobs:
             exit 1
           fi
 
-          echo "Simulator smoke test passed: installed and launched $bundle_id; screenshot captured."
+          echo "Simulator comprehensive AyuGram smoke test passed: installed, tested, launched, and screenshot captured for $bundle_id."
           xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" || true
 
       - name: Collect simulator artifacts
