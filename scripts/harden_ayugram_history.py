@@ -272,6 +272,7 @@ test += '''        add("History → Saved media set") {
             return (ok, ok ? "media and metadata copied to Documents/AyuGram/Saved" : "Saved copy failed")
         }
 
+'''
 if anchor not in smoke_text:
     raise SystemExit("Smoke test insertion anchor not found")
 smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
