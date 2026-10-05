@@ -57,6 +57,12 @@ jobs:
           fi
           /usr/bin/arch -x86_64 /usr/bin/true
 
+      - name: Install Bazelisk
+        run: |
+          brew list bazelisk >/dev/null 2>&1 || brew install bazelisk
+          command -v bazelisk
+          USE_BAZEL_VERSION=8.4.2 bazelisk --version
+
       - name: Validate required Telegram API secrets
         env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -281,7 +287,8 @@ jobs:
           set -o pipefail
           for attempt in 1 2; do
             echo "Simulator build attempt $attempt/2"
-            if python3 build-system/Make/Make.py \
+            if USE_BAZEL_VERSION=8.4.2 python3 build-system/Make/Make.py \
+              --bazel="$(command -v bazelisk)" \
               --cacheDir="$HOME/telegram-bazel-cache" \
               build \
               --configurationPath=build-system/ayugram-ci-configuration.json \
