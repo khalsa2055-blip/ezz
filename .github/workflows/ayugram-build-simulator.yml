@@ -290,7 +290,7 @@ jobs:
 
           xcrun simctl install "$DEVICE_UDID" "$app"
           set +e
-          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" 2>&1)
+          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryTest 2>&1)
           launch_rc=$?
           set -e
           echo "$launch_output"
