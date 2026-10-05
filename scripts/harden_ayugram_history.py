@@ -213,15 +213,40 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
         var didSave = false
         if let source = message.mediaPath, FileManager.default.fileExists(atPath: source) {
             let sourceURL = URL(fileURLWithPath: source)
-            let ext = sourceURL.pathExtension.isEmpty ? (pathExtension(for: message.mimeType) ?? "bin") : sourceURL.pathExtension
-            let destination = root.appendingPathComponent("media.\\(ext)")
-            do {
-                if !FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.copyItem(at: sourceURL, to: destination)
+            let sourceDirectory = sourceURL.deletingLastPathComponent()
+            let resourceFiles = ((try? FileManager.default.contentsOfDirectory(
+                at: sourceDirectory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []).filter { url in
+                url.pathExtension.lowercased() != "json" &&
+                (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+            if resourceFiles.count > 1 {
+                for (index, file) in resourceFiles.enumerated() {
+                    let ext = file.pathExtension.isEmpty ? (pathExtension(for: message.mimeType) ?? "bin") : file.pathExtension
+                    let destination = root.appendingPathComponent("media-\\(index + 1).\\(ext)")
+                    do {
+                        if !FileManager.default.fileExists(atPath: destination.path) {
+                            try FileManager.default.copyItem(at: file, to: destination)
+                        }
+                        didSave = true
+                    } catch {
+                        return false
+                    }
                 }
-                didSave = true
-            } catch {
-                return false
+            } else {
+                let ext = sourceURL.pathExtension.isEmpty ? (pathExtension(for: message.mimeType) ?? "bin") : sourceURL.pathExtension
+                let destination = root.appendingPathComponent("media.\\(ext)")
+                do {
+                    if !FileManager.default.fileExists(atPath: destination.path) {
+                        try FileManager.default.copyItem(at: sourceURL, to: destination)
+                    }
+                    didSave = true
+                } catch {
+                    return false
+                }
             }
         }
 
