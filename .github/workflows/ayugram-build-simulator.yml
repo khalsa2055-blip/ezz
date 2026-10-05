@@ -12,6 +12,8 @@ on:
       - 'submodules/**'
       - 'scripts/**'
 
+# History hardening v2
+
 permissions:
   contents: read
 concurrency:
