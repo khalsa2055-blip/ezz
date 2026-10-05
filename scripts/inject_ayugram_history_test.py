@@ -67,14 +67,32 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
             let message = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID, peerID: dialogID, fromID: accountID, messageID: messageID, date: Int32(Date().timeIntervalSince1970), text: "standalone saved media", mediaPath: temp.path, mimeType: "image/jpeg", isDeleted: true)
             let savedMedia = AyuGramMediaArchive.saveToSaved(message: message)
             let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("AyuGram", isDirectory: true).appendingPathComponent("Saved", isDirectory: true).appendingPathComponent(String(accountID), isDirectory: true).appendingPathComponent(String(dialogID), isDirectory: true).appendingPathComponent(String(messageID), isDirectory: true)
-            let mediaFileExists: Bool\n            let mediaMetadataExists: Bool\n            if let root {\n                mediaFileExists = FileManager.default.fileExists(atPath: root.appendingPathComponent("media.jpg").path)\n                mediaMetadataExists = FileManager.default.fileExists(atPath: root.appendingPathComponent("metadata.json").path)\n            } else {\n                mediaFileExists = false\n                mediaMetadataExists = false\n            }\n            let mediaOK = savedMedia && mediaFileExists && mediaMetadataExists
+            let mediaFileExists: Bool
+            let mediaMetadataExists: Bool
+            if let root {
+                mediaFileExists = FileManager.default.fileExists(atPath: root.appendingPathComponent("media.jpg").path)
+                mediaMetadataExists = FileManager.default.fileExists(atPath: root.appendingPathComponent("metadata.json").path)
+            } else {
+                mediaFileExists = false
+                mediaMetadataExists = false
+            }
+            let mediaOK = savedMedia && mediaFileExists && mediaMetadataExists
             add("History → Saved media copy", mediaOK, "media + metadata copied")
             try? FileManager.default.removeItem(at: root ?? temp)
 
             let textMessage = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID + 1, peerID: dialogID + 1, fromID: accountID, messageID: messageID + 1, date: Int32(Date().timeIntervalSince1970), text: "standalone saved text", isDeleted: true)
             let savedText = AyuGramMediaArchive.saveToSaved(message: textMessage)
             let textRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("AyuGram", isDirectory: true).appendingPathComponent("Saved", isDirectory: true).appendingPathComponent(String(accountID), isDirectory: true).appendingPathComponent(String(dialogID + 1), isDirectory: true).appendingPathComponent(String(messageID + 1), isDirectory: true)
-            let textFileExists: Bool\n            let textMetadataExists: Bool\n            if let textRoot {\n                textFileExists = FileManager.default.fileExists(atPath: textRoot.appendingPathComponent("message.txt").path)\n                textMetadataExists = FileManager.default.fileExists(atPath: textRoot.appendingPathComponent("metadata.json").path)\n            } else {\n                textFileExists = false\n                textMetadataExists = false\n            }\n            let textOK = savedText && textFileExists && textMetadataExists
+            let textFileExists: Bool
+            let textMetadataExists: Bool
+            if let textRoot {
+                textFileExists = FileManager.default.fileExists(atPath: textRoot.appendingPathComponent("message.txt").path)
+                textMetadataExists = FileManager.default.fileExists(atPath: textRoot.appendingPathComponent("metadata.json").path)
+            } else {
+                textFileExists = false
+                textMetadataExists = false
+            }
+            let textOK = savedText && textFileExists && textMetadataExists
             add("History → Saved text copy", textOK, "text + metadata copied")
             try? FileManager.default.removeItem(at: textRoot ?? FileManager.default.temporaryDirectory)
 
@@ -97,3 +115,42 @@ if "AyuGram standalone smoke report written" not in s:
         raise SystemExit("AppDelegate launch anchor not found")
     s = s.replace(launch_anchor, launch_anchor + "\n" + standalone_hook, 1)
 p.write_text(s, encoding="utf-8")
+
+# Add a first-class History button to every group/community info screen.
+peer_info = Path("submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift")
+if not peer_info.exists():
+    raise SystemExit(f"PeerInfo profile source not found: {peer_info}
+")
+peer_text = peer_info.read_text(encoding="utf-8")
+if "import AyuGramSettingsScreen" not in peer_text:
+    peer_text = peer_text.replace("import Foundation\n", "import Foundation\nimport AyuGramSettingsScreen\n", 1)
+
+channel_anchor = "    } else if case let .channel(channel) = data.peer {\n"
+channel_button = """    } else if case let .channel(channel) = data.peer {
+        if case .group = channel.info {
+            items[.peerSettings]!.append(PeerInfoScreenDisclosureItem(id: 98001, text: "AyuGram History", icon: UIImage(systemName: "clock.arrow.circlepath"), action: {
+                guard let controller = interaction.getController() else {
+                    return
+                }
+                controller.push(ayuGramHistoryScreen(context: context, dialogID: channel.id.toInt64()))
+            }))
+        }
+"""
+if channel_anchor in peer_text and "id: 98001, text: \"AyuGram History\"" not in peer_text:
+    peer_text = peer_text.replace(channel_anchor, channel_button, 1)
+
+legacy_anchor = "    } else if case let .legacyGroup(group) = data.peer {\n"
+legacy_button = """    } else if case let .legacyGroup(group) = data.peer {
+        items[.peerSettings]!.append(PeerInfoScreenDisclosureItem(id: 98002, text: "AyuGram History", icon: UIImage(systemName: "clock.arrow.circlepath"), action: {
+            guard let controller = interaction.getController() else {
+                return
+            }
+            controller.push(ayuGramHistoryScreen(context: context, dialogID: group.id.toInt64()))
+        })
+"""
+if legacy_anchor in peer_text and "id: 98002, text: \"AyuGram History\"" not in peer_text:
+    peer_text = peer_text.replace(legacy_anchor, legacy_button, 1)
+
+if "id: 98001, text: \"AyuGram History\"" not in peer_text and "id: 98002, text: \"AyuGram History\"" not in peer_text:
+    raise SystemExit("Could not add AyuGram History to any group info branch")
+peer_info.write_text(peer_text, encoding="utf-8")
