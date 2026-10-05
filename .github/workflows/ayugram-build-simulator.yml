@@ -321,6 +321,15 @@ jobs:
           bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
           test "$bundle_id" = "org.ayugram.ezz"
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+          info = plistlib.loads((Path("$app") / "Info.plist").read_bytes())
+          assert info.get("UIFileSharingEnabled") is True, info.get("UIFileSharingEnabled")
+          assert info.get("LSSupportsOpeningDocumentsInPlace") is True, info.get("LSSupportsOpeningDocumentsInPlace")
+          print("Final app Documents/Files flags: enabled")
+          PY
+
 
           main_binary="$app/$executable"
           lipo "$main_binary" -verify_arch arm64
