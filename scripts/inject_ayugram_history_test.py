@@ -19,10 +19,6 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                         let reportURL = (try? AyuGramRuntime.baseDirectory(accountID: accountID))?
                             .appendingPathComponent("AyuGramSmokeReport.json")
 
-                        _ = (context.context.account.postbox.transaction { transaction in
-                            AyuGramSmokeTest.run(accountID: accountID, transaction: transaction)
-                        }.startStandalone())
-                        
                         let testReportSignal = context.context.account.postbox.transaction { transaction in
                             AyuGramSmokeTest.run(accountID: accountID, transaction: transaction)
                         }
@@ -33,7 +29,7 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                     let data = try JSONEncoder().encode(report)
                                     try data.write(to: reportURL, options: .atomic)
                                 } catch {
-                                    print("AyuGram smoke report write failed: (error)")
+                                    print("AyuGram smoke report write failed: \\(error)")
                                 }
                             }
                             
@@ -46,7 +42,7 @@ hook = """                    self.mainWindow.viewController = context.rootContr
 
 """
 
-if "-AyuGramHistoryTest" not in s:
+if "-AyuGramFullSmokeTest" not in s:
     s = s.replace(anchor, hook, 1)
 
 p.write_text(s, encoding="utf-8")
