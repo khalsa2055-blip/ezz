@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   build-altstore:
-    runs-on: macos-26-intel
+    runs-on: macos-26
     timeout-minutes: 90
 
     steps:
