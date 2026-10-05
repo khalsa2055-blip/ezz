@@ -165,3 +165,249 @@ test = '''        add("per-dialog history isolation") {
 if anchor not in smoke_text:
     raise SystemExit("Smoke test insertion anchor not found")
 smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
+
+
+# Add a separate user-controlled Saved folder. History is automatic; Saved is
+# populated only when the user taps the row's real Save action.
+archive_text = archive.read_text()
+save_anchor = '''    public static func archive(
+'''
+save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
+        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("AyuGram", isDirectory: true)
+            .appendingPathComponent("Saved", isDirectory: true)
+            .appendingPathComponent(String(message.userID), isDirectory: true)
+            .appendingPathComponent(String(message.dialogID), isDirectory: true)
+            .appendingPathComponent(String(message.messageID), isDirectory: true)
+        guard let root else { return false }
+
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        } catch {
+            return false
+        }
+
+        var didSave = false
+        if let source = message.mediaPath, FileManager.default.fileExists(atPath: source) {
+            let sourceURL = URL(fileURLWithPath: source)
+            let ext = sourceURL.pathExtension.isEmpty ? (pathExtension(for: message.mimeType) ?? "bin") : sourceURL.pathExtension
+            let destination = root.appendingPathComponent("media.\\(ext)")
+            do {
+                if !FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.copyItem(at: sourceURL, to: destination)
+                }
+                didSave = true
+            } catch {
+                return false
+            }
+        }
+
+        if !message.text.isEmpty, let data = message.text.data(using: .utf8) {
+            do {
+                try data.write(to: root.appendingPathComponent("message.txt"), options: .atomic)
+                didSave = true
+            } catch {
+                return false
+            }
+        }
+
+        let metadata: [String: Any] = [
+            "messageID": message.messageID,
+            "dialogID": message.dialogID,
+            "accountID": message.userID,
+            "senderID": message.fromID,
+            "date": message.date,
+            "editDate": message.editDate,
+            "mimeType": message.mimeType ?? "",
+            "text": message.text,
+            "isDeleted": message.isDeleted
+        ]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: root.appendingPathComponent("metadata.json"), options: .atomic)
+            didSave = true
+        } catch {
+            return false
+        }
+
+        return didSave
+    }
+
+'''
+if save_anchor not in archive_text:
+    raise SystemExit("Saved API insertion anchor missing")
+if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_text:
+    archive.write_text(archive_text.replace(save_anchor, save_api + save_anchor, 1))
+
+# Turn each History row into a real actionable Save row while keeping the
+# message preview/date/media information visible.
+ui_text = ui.read_text()
+old_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
+    case header(String)
+    case item(Int64, String)
+    case empty(String)
+
+    var section: ItemListSectionId { return 0 }
+
+    var stableId: Int64 {
+        switch self {
+        case .header:
+            return 0
+        case let .item(id, _):
+            return id
+        case .empty:
+            return 1
+        }
+    }
+
+    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        switch (lhs, rhs) {
+        case let (.header(a), .header(b)):
+            return a == b
+        case let (.item(aId, a), .item(bId, b)):
+            return aId == bId && a == b
+        case let (.empty(a), .empty(b)):
+            return a == b
+        default:
+            return false
+        }
+    }
+
+    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        switch self {
+        case let .header(text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+        case let .item(_, text), let .empty(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        }
+    }
+}'''
+new_enum = '''private enum AyuHistoryEntry: ItemListNodeEntry {
+    case header(String)
+    case item(Int64, String, AyuMessage)
+    case empty(String)
+
+    var section: ItemListSectionId { return 0 }
+
+    var stableId: Int64 {
+        switch self {
+        case .header:
+            return 0
+        case let .item(id, _, _):
+            return id
+        case .empty:
+            return 1
+        }
+    }
+
+    static func == (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        switch (lhs, rhs) {
+        case let (.header(a), .header(b)):
+            return a == b
+        case let (.item(aId, a, _), .item(bId, b, _)):
+            return aId == bId && a == b
+        case let (.empty(a), .empty(b)):
+            return a == b
+        default:
+            return false
+        }
+    }
+
+    static func < (lhs: AyuHistoryEntry, rhs: AyuHistoryEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        switch self {
+        case let .header(text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+        case let .item(_, text, message):
+            return ItemListActionItem(
+                presentationData: presentationData,
+                systemStyle: .glass,
+                title: text,
+                kind: .generic,
+                alignment: .natural,
+                sectionId: self.section,
+                style: .blocks,
+                action: {
+                    _ = AyuGramMediaArchive.saveToSaved(message: message)
+                }
+            )
+        case let .empty(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        }
+    }
+}'''
+if old_enum not in ui_text:
+    raise SystemExit("History entry UI anchor missing")
+ui_text = ui_text.replace(old_enum, new_enum, 1)
+
+old_entry_line = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
+        entries.append(.item(message.fakeID, "\\(kind) • \\(date)\\(mediaLabel)\\n\\(body)"))
+'''
+new_entry_line = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
+        let preview = "\\(kind) • \\(date)\\n\\(body)\\n💾 Save"
+        entries.append(.item(message.fakeID, preview, message))
+'''
+if old_entry_line not in ui_text:
+    raise SystemExit("History row construction anchor missing")
+ui.write_text(ui_text.replace(old_entry_line, new_entry_line, 1))
+
+# Validate the user-visible Save action and its real storage contract.
+archive_text = archive.read_text()
+ui_text = ui.read_text()
+if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_text:
+    raise SystemExit("Saved action implementation missing")
+if "AyuGramMediaArchive.saveToSaved(message: message)" not in ui_text:
+    raise SystemExit("History Save action wiring missing")
+if '.appendingPathComponent("Saved", isDirectory: true)' not in archive_text:
+    raise SystemExit("Saved folder path missing")
+
+# Add a runtime smoke test proving a media copy really reaches the Saved folder.
+smoke_text = smoke.read_text()
+anchor = '        add("history display labels") {'
+test = '''        add("History → Saved copy") {
+            let dialogID = Int64(9_800_000) + abs(accountID % 100_000)
+            let messageID = Int32(1_700_000_000) + abs(Int32(accountID % 10_000))
+            let temp = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-smoke-\\(accountID)-\\(messageID).jpg")
+            try Data("ayugram-smoke-media".utf8).write(to: temp, options: .atomic)
+            defer { try? FileManager.default.removeItem(at: temp) }
+
+            let message = AyuMessage(
+                fakeID: 0,
+                userID: accountID,
+                dialogID: dialogID,
+                peerID: dialogID,
+                fromID: accountID,
+                messageID: messageID,
+                date: Int32(Date().timeIntervalSince1970),
+                text: "AyuGram saved smoke test",
+                mediaPath: temp.path,
+                mimeType: "image/jpeg",
+                isDeleted: true
+            )
+            let saved = AyuGramMediaArchive.saveToSaved(message: message)
+            let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("AyuGram", isDirectory: true)
+                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent(String(accountID), isDirectory: true)
+                .appendingPathComponent(String(dialogID), isDirectory: true)
+                .appendingPathComponent(String(messageID), isDirectory: true)
+            let savedMedia = savedRoot?.appendingPathComponent("media.jpg")
+            let savedMetadata = savedRoot?.appendingPathComponent("metadata.json")
+            let ok = saved
+                && (savedMedia.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (savedMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            return (ok, ok ? "media and metadata copied to Documents/AyuGram/Saved" : "Saved copy failed")
+        }
+
+'''
+if anchor not in smoke_text:
+    raise SystemExit("Smoke test saved-copy anchor missing")
+if "add("History → Saved copy")" not in smoke_text:
+    smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
