@@ -3,7 +3,7 @@ import re
 
 # This runs after the main AyuGram patch has been applied to Telegram-iOS.
 # It hardens the History implementation without changing the upstream patch.
-root = Path("telegram-ios")
+root = Path("telegram-ios") if Path("telegram-ios").is_dir() else Path(".")
 archive = root / "submodules/AyuGramIOS/Sources/AyuGramMediaArchive.swift"
 message = root / "submodules/AyuGramIOS/Sources/MessageHistory.swift"
 store = root / "submodules/AyuGramIOS/Sources/AyuGramPostboxHistoryStore.swift"
