@@ -3124,5 +3124,5 @@ diff --git a/submodules/TelegramUI/Sources/AppDelegate.swift b/submodules/Telegr
 +                            )
 +                        }
 +                    }
-+                     if firstTime {
+                      if firstTime {
                          let layer = context.rootController.view.layer
