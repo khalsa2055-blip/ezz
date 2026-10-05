@@ -206,6 +206,72 @@ test = '''        add("per-dialog history isolation") {
         }
 
 '''
+test = ''        add("History → Saved media set") {
+            let dialogID = Int64(9_810_000) + abs(accountID % 100_000)
+            let messageID = Int32(1_710_000_000) + abs(Int32(accountID % 10_000))
+            let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-media-set", isDirectory: true)
+            try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+            let first = tempRoot.appendingPathComponent("0.jpg")
+            let second = tempRoot.appendingPathComponent("1.mp4")
+            try Data("one".utf8).write(to: first, options: .atomic)
+            try Data("two".utf8).write(to: second, options: .atomic)
+
+            let message = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID, peerID: dialogID, fromID: accountID, messageID: messageID, date: Int32(Date().timeIntervalSince1970), text: "AyuGram media-set smoke", mediaPath: first.path, mimeType: "image/jpeg", isDeleted: true)
+            let saved = AyuGramMediaArchive.saveToSaved(message: message)
+            let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("AyuGram", isDirectory: true)
+                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent(String(accountID), isDirectory: true)
+                .appendingPathComponent(String(dialogID), isDirectory: true)
+                .appendingPathComponent(String(messageID), isDirectory: true)
+                .appendingPathComponent("media", isDirectory: true)
+            let firstSaved = savedRoot?.appendingPathComponent("0.jpg")
+            let secondSaved = savedRoot?.appendingPathComponent("1.mp4")
+            let ok = saved
+                && (firstSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (secondSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            if let cleanup = savedRoot?.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() {
+                try? FileManager.default.removeItem(at: cleanup)
+            }
+            return (ok, ok ? "all archived media files copied to Saved/media" : "Saved media set copy failed")
+        }
+        add("History → Saved copy") {
+            let dialogID = Int64(9_800_000) + abs(accountID % 100_000)
+            let messageID = Int32(1_700_000_000) + abs(Int32(accountID % 10_000))
+            let temp = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-smoke-\\(accountID)-\\(messageID).jpg")
+            try Data("ayugram-smoke-media".utf8).write(to: temp, options: .atomic)
+            defer { try? FileManager.default.removeItem(at: temp) }
+
+            let message = AyuMessage(
+                fakeID: 0,
+                userID: accountID,
+                dialogID: dialogID,
+                peerID: dialogID,
+                fromID: accountID,
+                messageID: messageID,
+                date: Int32(Date().timeIntervalSince1970),
+                text: "AyuGram saved smoke test",
+                mediaPath: temp.path,
+                mimeType: "image/jpeg",
+                isDeleted: true
+            )
+            let saved = AyuGramMediaArchive.saveToSaved(message: message)
+            let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("AyuGram", isDirectory: true)
+                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent(String(accountID), isDirectory: true)
+                .appendingPathComponent(String(dialogID), isDirectory: true)
+                .appendingPathComponent(String(messageID), isDirectory: true)
+            let savedMedia = savedRoot?.appendingPathComponent("media.jpg")
+            let savedMetadata = savedRoot?.appendingPathComponent("metadata.json")
+            let ok = saved
+                && (savedMedia.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (savedMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            return (ok, ok ? "media and metadata copied to Documents/AyuGram/Saved" : "Saved copy failed")
+        }
+
 if anchor not in smoke_text:
     raise SystemExit("Smoke test insertion anchor not found")
 smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
@@ -614,72 +680,6 @@ if '.appendingPathComponent("Saved", isDirectory: true)' not in archive_text:
 # Add a runtime smoke test proving a media copy really reaches the Saved folder.
 smoke_text = smoke.read_text()
 anchor = '        add("history display labels") {'
-test = '''        add("History → Saved media set") {
-            let dialogID = Int64(9_810_000) + abs(accountID % 100_000)
-            let messageID = Int32(1_710_000_000) + abs(Int32(accountID % 10_000))
-            let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-media-set", isDirectory: true)
-            try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: tempRoot) }
-
-            let first = tempRoot.appendingPathComponent("0.jpg")
-            let second = tempRoot.appendingPathComponent("1.mp4")
-            try Data("one".utf8).write(to: first, options: .atomic)
-            try Data("two".utf8).write(to: second, options: .atomic)
-
-            let message = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID, peerID: dialogID, fromID: accountID, messageID: messageID, date: Int32(Date().timeIntervalSince1970), text: "AyuGram media-set smoke", mediaPath: first.path, mimeType: "image/jpeg", isDeleted: true)
-            let saved = AyuGramMediaArchive.saveToSaved(message: message)
-            let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-                .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("Saved", isDirectory: true)
-                .appendingPathComponent(String(accountID), isDirectory: true)
-                .appendingPathComponent(String(dialogID), isDirectory: true)
-                .appendingPathComponent(String(messageID), isDirectory: true)
-                .appendingPathComponent("media", isDirectory: true)
-            let firstSaved = savedRoot?.appendingPathComponent("0.jpg")
-            let secondSaved = savedRoot?.appendingPathComponent("1.mp4")
-            let ok = saved
-                && (firstSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-                && (secondSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-            if let cleanup = savedRoot?.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() {
-                try? FileManager.default.removeItem(at: cleanup)
-            }
-            return (ok, ok ? "all archived media files copied to Saved/media" : "Saved media set copy failed")
-        }
-        add("History → Saved copy") {
-            let dialogID = Int64(9_800_000) + abs(accountID % 100_000)
-            let messageID = Int32(1_700_000_000) + abs(Int32(accountID % 10_000))
-            let temp = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-history-smoke-\\(accountID)-\\(messageID).jpg")
-            try Data("ayugram-smoke-media".utf8).write(to: temp, options: .atomic)
-            defer { try? FileManager.default.removeItem(at: temp) }
-
-            let message = AyuMessage(
-                fakeID: 0,
-                userID: accountID,
-                dialogID: dialogID,
-                peerID: dialogID,
-                fromID: accountID,
-                messageID: messageID,
-                date: Int32(Date().timeIntervalSince1970),
-                text: "AyuGram saved smoke test",
-                mediaPath: temp.path,
-                mimeType: "image/jpeg",
-                isDeleted: true
-            )
-            let saved = AyuGramMediaArchive.saveToSaved(message: message)
-            let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-                .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("Saved", isDirectory: true)
-                .appendingPathComponent(String(accountID), isDirectory: true)
-                .appendingPathComponent(String(dialogID), isDirectory: true)
-                .appendingPathComponent(String(messageID), isDirectory: true)
-            let savedMedia = savedRoot?.appendingPathComponent("media.jpg")
-            let savedMetadata = savedRoot?.appendingPathComponent("metadata.json")
-            let ok = saved
-                && (savedMedia.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-                && (savedMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-            return (ok, ok ? "media and metadata copied to Documents/AyuGram/Saved" : "Saved copy failed")
-        }
-
 '''
 if anchor not in smoke_text:
     raise SystemExit("Smoke test saved-copy anchor missing")
