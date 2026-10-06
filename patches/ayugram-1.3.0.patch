@@ -3023,7 +3023,7 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                })
 +            })))
 +
-+            if (ayuSettings.saveDeletedMessages || ayuSettings.saveMessagesHistory) && !isAction {
++            if !isAction {
 +                actions.append(.action(ContextMenuActionItem(text: "AyuGram History", icon: { theme in
 +                    return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Search"), color: theme.actionSheet.primaryTextColor)
 +                }, action: { c, _ in
