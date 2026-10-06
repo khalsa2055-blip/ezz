@@ -234,6 +234,58 @@ new file mode 100644
 +        _ = AyuGramPostboxHistoryStore.appendDeleted(transaction: transaction, messages: snapshots)
 +    }
 +
++    /// User-invoked save. Copy protection is not used as a local-save gate
++    /// when the message media is already available in the device MediaBox.
++    public static func saveNow(
++        transaction: Transaction,
++        mediaBox: MediaBox,
++        message: Message,
++        accountID: Int64
++    ) -> Bool {
++        guard !message.containsSecretMedia else {
++            return false
++        }
++
++        var resources: [AyuMediaResourceInfo] = []
++        for media in message.effectiveMedia {
++            if let image = media as? TelegramMediaImage {
++                for representation in image.representations.sorted(by: {
++                    Int64($0.dimensions.width) * Int64($0.dimensions.height)
++                        > Int64($1.dimensions.width) * Int64($1.dimensions.height)
++                }) {
++                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
++                }
++            } else if let file = media as? TelegramMediaFile {
++                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
++            }
++        }
++
++        var mediaPath: String?
++        var mimeType: String?
++        if !resources.isEmpty {
++            var seen: Set<String> = []
++            let uniqueResources = resources.filter { seen.insert($0.id).inserted }
++            let archived = AyuGramMediaArchive.archive(
++                mediaBox: mediaBox,
++                accountID: accountID,
++                dialogID: message.id.peerId.toInt64(),
++                messageID: message.id.id,
++                resources: uniqueResources
++            )
++            mediaPath = archived.path
++            mimeType = archived.mimeType
++        }
++
++        let snapshot = AyuGramPostboxBridge.snapshot(
++            message: message,
++            accountID: accountID,
++            isDeleted: false,
++            mediaPath: mediaPath,
++            mimeType: mimeType
++        )
++        return AyuGramMediaArchive.saveToSaved(message: snapshot)
++    }
++
 +    public static func captureEdited(
 +        transaction: Transaction,
 +        mediaBox: MediaBox,
@@ -2861,6 +2913,81 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                    })
 +                })))
 +            }
++
++            actions.append(.action(ContextMenuActionItem(text: "AyuGram Save", icon: { theme in
++                return generateTintedImage(image: UIImage(systemName: "tray.and.arrow.down"), color: theme.actionSheet.primaryTextColor)
++            }, action: { c, _ in
++                c?.dismiss(completion: {
++                    let _ = (context.account.postbox.transaction { transaction in
++                        AyuGramCaptureService.saveNow(
++                            transaction: transaction,
++                            mediaBox: context.account.postbox.mediaBox,
++                            message: message,
++                            accountID: context.account.peerId.toInt64()
++                        )
++                    } |> deliverOnMainQueue).startStandalone(next: { saved in
++                        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
++                        context.sharedContext.mainWindow?.present(
++                            UndoOverlayController(
++                                presentationData: presentationData,
++                                content: .universal(animation: saved ? "anim_saved_messages" : "anim_info", scale: 0.066, colors: [:], title: nil, text: saved ? "Saved to AyuGram" : "AyuGram could not save this message", customUndoText: nil, timeout: nil),
++                                elevatedLayout: false,
++                                animateInAsReplacement: false,
++                                action: { _ in return false }
++                            ),
++                            in: .current
++                        )
++                    })
++                })
++            })))
++
++            actions.append(.action(ContextMenuActionItem(text: "AyuGram Transfer to Saved Messages", icon: { theme in
++                return generateTintedImage(image: UIImage(systemName: "arrowshape.turn.up.right"), color: theme.actionSheet.primaryTextColor)
++            }, action: { c, _ in
++                c?.dismiss(completion: {
++                    let transferableMedia = message.effectiveMedia.filter { media in
++                        media is TelegramMediaImage || media is TelegramMediaFile
++                    }
++                    var outgoing: [EnqueueMessage] = []
++                    if transferableMedia.isEmpty {
++                        if !message.text.isEmpty {
++                            outgoing.append(.message(text: message.text, attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: []))
++                        }
++                    } else {
++                        for (index, media) in transferableMedia.enumerated() {
++                            outgoing.append(.message(
++                                text: index == 0 ? message.text : "",
++                                attributes: [],
++                                inlineStickers: [:],
++                                mediaReference: AnyMediaReference.standalone(media: media),
++                                threadId: nil,
++                                replyToMessageId: nil,
++                                replyToStoryId: nil,
++                                localGroupingKey: nil,
++                                correlationId: nil,
++                                bubbleUpEmojiOrStickersets: []
++                            ))
++                        }
++                    }
++                    guard !outgoing.isEmpty else {
++                        return
++                    }
++                    let _ = enqueueMessages(account: context.account, peerId: context.account.peerId, messages: outgoing)
++                        .startStandalone(next: { _ in
++                            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
++                            context.sharedContext.mainWindow?.present(
++                                UndoOverlayController(
++                                    presentationData: presentationData,
++                                    content: .universal(animation: "anim_saved_messages", scale: 0.066, colors: [:], title: nil, text: "Transferred to Saved Messages", customUndoText: nil, timeout: nil),
++                                    elevatedLayout: false,
++                                    animateInAsReplacement: false,
++                                    action: { _ in return false }
++                                ),
++                                in: .current
++                            )
++                        })
++                })
++            })))
 +
 +            if (ayuSettings.saveDeletedMessages || ayuSettings.saveMessagesHistory) && !isAction {
 +                actions.append(.action(ContextMenuActionItem(text: "AyuGram History", icon: { theme in
