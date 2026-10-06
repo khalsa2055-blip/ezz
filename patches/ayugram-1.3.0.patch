@@ -180,7 +180,7 @@ diff --git a/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift b/submodu
 new file mode 100644
 --- /dev/null
 +++ b/submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,132 @@
 +import Foundation
 +import Postbox
 +
@@ -234,28 +234,13 @@ new file mode 100644
 +        _ = AyuGramPostboxHistoryStore.appendDeleted(transaction: transaction, messages: snapshots)
 +    }
 +
-+    /// User-invoked save. Copy protection is not used as a local-save gate
-+    /// when the message media is already available in the device MediaBox.
++    /// User-invoked save. The caller (TelegramUI) supplies media resources
++    /// because AyuGramIOS intentionally does not depend on TelegramCore.
 +    public static func saveNow(
-+        transaction: Transaction,
 +        mediaBox: MediaBox,
-+        message: Message,
-+        accountID: Int64
++        snapshot: AyuMessage,
++        resources: [AyuMediaResourceInfo]
 +    ) -> Bool {
-+        +        var resources: [AyuMediaResourceInfo] = []
-+        for media in message.media {
-+            if let image = media as? TelegramMediaImage {
-+                for representation in image.representations.sorted(by: {
-+                    Int64($0.dimensions.width) * Int64($0.dimensions.height)
-+                        > Int64($1.dimensions.width) * Int64($1.dimensions.height)
-+                }) {
-+                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
-+                }
-+            } else if let file = media as? TelegramMediaFile {
-+                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
-+            }
-+        }
-+
 +        var mediaPath: String?
 +        var mimeType: String?
 +        if !resources.isEmpty {
@@ -263,23 +248,31 @@ new file mode 100644
 +            let uniqueResources = resources.filter { seen.insert($0.id).inserted }
 +            let archived = AyuGramMediaArchive.archive(
 +                mediaBox: mediaBox,
-+                accountID: accountID,
-+                dialogID: message.id.peerId.toInt64(),
-+                messageID: message.id.id,
++                accountID: snapshot.userID,
++                dialogID: snapshot.dialogID,
++                messageID: snapshot.messageID,
 +                resources: uniqueResources
 +            )
 +            mediaPath = archived.path
 +            mimeType = archived.mimeType
 +        }
 +
-+        let snapshot = AyuGramPostboxBridge.snapshot(
-+            message: message,
-+            accountID: accountID,
-+            isDeleted: false,
++        let savedSnapshot = AyuMessage(
++            fakeID: snapshot.fakeID,
++            userID: snapshot.userID,
++            dialogID: snapshot.dialogID,
++            peerID: snapshot.peerID,
++            fromID: snapshot.fromID,
++            topicID: snapshot.topicID,
++            messageID: snapshot.messageID,
++            date: snapshot.date,
++            editDate: snapshot.editDate,
++            text: snapshot.text,
 +            mediaPath: mediaPath,
-+            mimeType: mimeType
++            mimeType: mimeType,
++            isDeleted: snapshot.isDeleted
 +        )
-+        return AyuGramMediaArchive.saveToSaved(message: snapshot)
++        return AyuGramMediaArchive.saveToSaved(message: savedSnapshot)
 +    }
 +
 +    public static func captureEdited(
@@ -2914,12 +2907,27 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                return generateTintedImage(image: UIImage(systemName: "tray.and.arrow.down"), color: theme.actionSheet.primaryTextColor)
 +            }, action: { c, _ in
 +                c?.dismiss(completion: {
-+                    let _ = (context.account.postbox.transaction { transaction in
++                    let resources: [AyuMediaResourceInfo] = message.media.flatMap { media in
++                        if let image = media as? TelegramMediaImage {
++                            return image.representations.map {
++                                AyuMediaResourceInfo(id: $0.resource.id.stringRepresentation, mimeType: "image/jpeg")
++                            }
++                        } else if let file = media as? TelegramMediaFile {
++                            return [AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType)]
++                        } else {
++                            return []
++                        }
++                    }
++                    let snapshot = AyuGramPostboxBridge.snapshot(
++                        message: message,
++                        accountID: context.account.peerId.toInt64(),
++                        isDeleted: false
++                    )
++                    let _ = context.account.postbox.transaction { _ in
 +                        AyuGramCaptureService.saveNow(
-+                            transaction: transaction,
 +                            mediaBox: context.account.postbox.mediaBox,
-+                            message: message,
-+                            accountID: context.account.peerId.toInt64()
++                            snapshot: snapshot,
++                            resources: resources
 +                        )
 +                    } |> deliverOnMainQueue).startStandalone(next: { saved in
 +                        controllerInteraction.displayUndo(.info(title: nil, text: saved ? "Saved to AyuGram" : "AyuGram could not save this message", timeout: 2.0, customUndoText: nil))
