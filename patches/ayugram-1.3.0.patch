@@ -183,7 +183,6 @@ new file mode 100644
 @@ -0,0 +1,85 @@
 +import Foundation
 +import Postbox
-+import TelegramCore
 +
 +/// Entry points used by TelegramCore just before a message is deleted or
 +/// replaced by an edit. Completed local media is copied into an AyuGram-owned
