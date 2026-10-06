@@ -1026,20 +1026,16 @@ if "let deletionDate" not in u:
         raise SystemExit("History date anchor not found")
 
 # Replace the entry construction with sender + deleted-at details.
-old_entry = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
-        entries.append(.message(message.fakeID, message, body, date, kind))
-'''
-new_entry = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
-        let sender = message.fromName ?? ""
-        let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date
-        entries.append(.message(message.fakeID, message, body, meta, kind, sender))
-'''
-if old_entry in u:
-    u = u.replace(old_entry, new_entry, 1)
+# Replace the entry construction with sender + deleted-at details.
+const entryLine = "entries.append(.message(message.fakeID, message, body, date, kind))"
+if (entryLine in u):
+    u = u.replace(
+        entryLine,
+        "let sender = message.fromName ?? \"\\"\n        let meta = deletionDate.map { \"\\(date) • Deleted \\($0)\" } ?? date\n        entries.append(.message(message.fakeID, message, body, meta, kind, sender))",
+        1,
+    )
 elif ".message(message.fakeID, message, body, meta, kind, sender)" not in u:
-    # The injected history UI uses this exact construction in the current tree;
-    # fail rather than silently keeping the old ID-only view.
-    raise SystemExit("History entry construction anchor not found")
+    raise SystemExit("History entry construction not recognized")
 
 ui.write_text(u)
 
