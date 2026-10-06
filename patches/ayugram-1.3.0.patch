@@ -2914,22 +2914,9 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                c?.dismiss(completion: {
 +                    let accountID = context.account.peerId.toInt64()
 +                    let messageSaveGroups: [(AyuMessage, [(MediaResource, AyuMediaResourceInfo, String?)])] = ayuSavableMessages.map { item in
-+                        let senderName: String? = {
-+                            guard let author = item.author else { return nil }
-+                            if let user = author as? TelegramUser {
-+                                let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
-+                                return parts.isEmpty ? nil : parts.joined(separator: " ")
-+                            } else if let channel = author as? TelegramChannel {
-+                                return channel.title
-+                            } else if let group = author as? TelegramGroup {
-+                                return group.title
-+                            }
-+                            return nil
-+                        }()
 +                        let snapshot = AyuGramPostboxBridge.snapshot(
 +                            message: item,
 +                            accountID: accountID,
-+                            fromName: senderName,
 +                            isDeleted: false
 +                        )
 +                        let resources: [(MediaResource, AyuMediaResourceInfo, String?)] = item.effectiveMedia.flatMap { media in
