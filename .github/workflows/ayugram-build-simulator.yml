@@ -44,6 +44,11 @@ jobs:
           fi
           xcodebuild -version
           xcode-select -p
+          if ! xcrun --find metal >/dev/null 2>&1; then
+            echo "Metal toolchain missing; downloading it..."
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --find metal
 
       - name: Enable Rosetta for Intel build tools when needed
         run: |
