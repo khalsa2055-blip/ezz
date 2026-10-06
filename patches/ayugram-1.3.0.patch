@@ -2926,17 +2926,7 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                            accountID: context.account.peerId.toInt64()
 +                        )
 +                    } |> deliverOnMainQueue).startStandalone(next: { saved in
-+                        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-+                        context.sharedContext.mainWindow?.present(
-+                            UndoOverlayController(
-+                                presentationData: presentationData,
-+                                content: .universal(animation: saved ? "anim_saved_messages" : "anim_info", scale: 0.066, colors: [:], title: nil, text: saved ? "Saved to AyuGram" : "AyuGram could not save this message", customUndoText: nil, timeout: nil),
-+                                elevatedLayout: false,
-+                                animateInAsReplacement: false,
-+                                action: { _ in return false }
-+                            ),
-+                            in: .current
-+                        )
++                        controllerInteraction.displayUndo(.info(title: nil, text: saved ? "Saved to AyuGram" : "AyuGram could not save this message", timeout: 2.0, customUndoText: nil))
 +                    })
 +                })
 +            })))
@@ -2974,17 +2964,7 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                    }
 +                    let _ = enqueueMessages(account: context.account, peerId: context.account.peerId, messages: outgoing)
 +                        .startStandalone(next: { _ in
-+                            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-+                            context.sharedContext.mainWindow?.present(
-+                                UndoOverlayController(
-+                                    presentationData: presentationData,
-+                                    content: .universal(animation: "anim_saved_messages", scale: 0.066, colors: [:], title: nil, text: "Transferred to Saved Messages", customUndoText: nil, timeout: nil),
-+                                    elevatedLayout: false,
-+                                    animateInAsReplacement: false,
-+                                    action: { _ in return false }
-+                                ),
-+                                in: .current
-+                            )
++                            controllerInteraction.displayUndo(.info(title: nil, text: "Transferred to Saved Messages", timeout: 2.0, customUndoText: nil))
 +                        })
 +                })
 +            })))
