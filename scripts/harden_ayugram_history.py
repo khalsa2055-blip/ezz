@@ -1025,27 +1025,29 @@ if "let deletionDate" not in u:
     else:
         raise SystemExit("History date anchor not found")
 
-# Replace the entry construction with sender + deleted-at details.
-entry_match = re.search(r'(?m)^(\s*)entries\.append\(\.message\(message\.fakeID, message, body, date, kind\)\)', u)
-if entry_match:
-    indent = entry_match.group(1)
+# The current History source uses .item(id, text), not a .message entry.
+# Preserve that established ItemList model and enrich its displayed text.
+item_match = re.search(r'(?m)^(\s*)entries\.append\(\.item\(message\.fakeID, (.+)\)\)', u)
+if item_match:
+    indent = item_match.group(1)
     replacement = (
         indent + 'let sender = message.fromName ?? ""\n'
         + indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
-        + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
+        + indent + 'entries.append(.item(message.fakeID, "\\(sender.isEmpty ? \"Unknown sender\" : sender) • \\(kind) • \\(meta)\\(mediaLabel)\\n\\(body)"))'
     )
-    u = u[:entry_match.start()] + replacement + u[entry_match.end():]
+    u = u[:item_match.start()] + replacement + u[item_match.end():]
 else:
-    generic = re.search(r'(?m)^(\s*)entries\.append\(\.message\(message\.fakeID, message, body, ([^,]+), ([^)]+)\)\)', u)
-    if generic and generic.group(2).strip() == "date":
-        indent = generic.group(1)
+    # Support a future richer .message model if the source is deliberately upgraded.
+    entry_match = re.search(r'(?m)^(\s*)entries\.append\(\.message\(message\.fakeID, message, body, date, kind\)\)', u)
+    if entry_match:
+        indent = entry_match.group(1)
         replacement = (
             indent + 'let sender = message.fromName ?? ""\n'
             + indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
             + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
         )
-        u = u[:generic.start()] + replacement + u[generic.end():]
-    elif ".message(message.fakeID, message, body, meta, kind, sender)" not in u:
+        u = u[:entry_match.start()] + replacement + u[entry_match.end():]
+    elif ".message(message.fakeID, message, body, meta, kind, sender)" not in u and ".item(message.fakeID" not in u:
         raise SystemExit("History entry construction not recognized")
 
 ui.write_text(u)
