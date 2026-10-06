@@ -2904,38 +2904,88 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +            }
 +
 +            actions.append(.action(ContextMenuActionItem(text: "AyuGram Save", icon: { theme in
-+                return generateTintedImage(image: UIImage(systemName: "tray.and.arrow.down"), color: theme.actionSheet.primaryTextColor)
-+            }, action: { c, _ in
-+                c?.dismiss(completion: {
-+                    let resources: [AyuMediaResourceInfo] = message.media.flatMap { media in
-+                        if let image = media as? TelegramMediaImage {
-+                            return image.representations.map {
-+                                AyuMediaResourceInfo(id: $0.resource.id.stringRepresentation, mimeType: "image/jpeg")
-+                            }
-+                        } else if let file = media as? TelegramMediaFile {
-+                            return [AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType)]
-+                        } else {
-+                            return []
-+                        }
-+                    }
-+                    let snapshot = AyuGramPostboxBridge.snapshot(
-+                        message: message,
-+                        accountID: context.account.peerId.toInt64(),
-+                        isDeleted: false
-+                    )
-+                    let _ = (context.account.postbox.transaction { _ in
-+                        AyuGramCaptureService.saveNow(
-+                            mediaBox: context.account.postbox.mediaBox,
-+                            snapshot: snapshot,
-+                            resources: resources
-+                        )
-+                    } |> deliverOnMainQueue).startStandalone(next: { saved in
-+                        controllerInteraction.displayUndo(.info(title: nil, text: saved ? "Saved to AyuGram" : "AyuGram could not save this message", timeout: 2.0, customUndoText: nil))
-+                    })
-+                })
-+            })))
-+
-+            actions.append(.action(ContextMenuActionItem(text: "AyuGram Transfer to Saved Messages", icon: { theme in
+                return generateTintedImage(image: UIImage(systemName: "tray.and.arrow.down"), color: theme.actionSheet.primaryTextColor)
+            }, action: { c, _ in
+                c?.dismiss(completion: {
+                    let accountID = context.account.peerId.toInt64()
+                    let senderName: String? = {
+                        guard let author = message.author else { return nil }
+                        if let user = author as? TelegramUser {
+                            let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+                            return parts.isEmpty ? nil : parts.joined(separator: " ")
+                        } else if let channel = author as? TelegramChannel {
+                            return channel.title
+                        } else if let group = author as? TelegramGroup {
+                            return group.title
+                        }
+                        return nil
+                    }()
+                    let snapshot = AyuGramPostboxBridge.snapshot(
+                        message: message,
+                        accountID: accountID,
+                        fromName: senderName,
+                        isDeleted: false
+                    )
+                    let resources: [(MediaResource, AyuMediaResourceInfo, String?)] = message.effectiveMedia.flatMap { media in
+                        if let image = media as? TelegramMediaImage {
+                            return image.representations.map { representation in
+                                (representation.resource, AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"), "jpg")
+                            }
+                        } else if let file = media as? TelegramMediaFile {
+                            return [(file.resource, AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType), nil)]
+                        }
+                        return []
+                    }
+                    let saveSignal: Signal<Bool, NoError>
+                    if resources.isEmpty {
+                        saveSignal = .single(AyuGramCaptureService.saveNow(
+                            mediaBox: context.account.postbox.mediaBox,
+                            snapshot: snapshot,
+                            resources: []
+                        ))
+                    } else {
+                        let fetchSignals: [Signal<Bool, NoError>] = resources.map { resource, _, pathExtension in
+                            Signal { subscriber in
+                                let fetchedDisposable = context.account.postbox.mediaBox.fetchedResource(resource, parameters: nil).start()
+                                let dataDisposable = context.account.postbox.mediaBox.resourceData(
+                                    resource,
+                                    pathExtension: pathExtension,
+                                    option: .complete(waitUntilFetchStatus: false),
+                                    attemptSynchronously: false
+                                )
+                                |> filter { $0.complete }
+                                |> take(1)
+                                let disposable = dataDisposable.start(next: { _ in
+                                    subscriber.putNext(true)
+                                    subscriber.putCompletion()
+                                }, error: { _ in
+                                    subscriber.putNext(false)
+                                    subscriber.putCompletion()
+                                })
+                                return ActionDisposable {
+                                    fetchedDisposable.dispose()
+                                    disposable.dispose()
+                                }
+                            }
+                        }
+                        saveSignal = combineLatest(fetchSignals)
+                        |> map { states in
+                            guard states.allSatisfy({ $0 }) else { return false }
+                            return AyuGramCaptureService.saveNow(
+                                mediaBox: context.account.postbox.mediaBox,
+                                snapshot: snapshot,
+                                resources: resources.map { $0.1 }
+                            )
+                        }
+                        |> take(1)
+                    }
+                    _ = (saveSignal |> deliverOnMainQueue).startStandalone(next: { saved in
+                        let text = saved ? "Saved to AyuGram" : "AyuGram could not save this message"
+                        controllerInteraction.displayUndo(.info(title: nil, text: text, timeout: 2.0, customUndoText: nil))
+                    })
+                })
+            })))
+            actions.append(.action(ContextMenuActionItem(text: "AyuGram Transfer to Saved Messages", icon: { theme in
 +                return generateTintedImage(image: UIImage(systemName: "arrowshape.turn.up.right"), color: theme.actionSheet.primaryTextColor)
 +            }, action: { c, _ in
 +                c?.dismiss(completion: {
