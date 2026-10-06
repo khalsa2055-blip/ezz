@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   build-simulator:
-    runs-on: macos-26-intel
+    # Telegram-iOS baseline builds sim_arm64; use Apple Silicon runner so Simulator can install it directly.\n    runs-on: macos-26
     timeout-minutes: 150
 
     steps:
@@ -49,18 +49,6 @@ jobs:
             xcodebuild -downloadComponent MetalToolchain
           fi
           xcrun --find metal
-
-      - name: Enable Rosetta for Intel build tools when needed
-        run: |
-          translated="$(sysctl -in sysctl.proc_translated 2>/dev/null || echo 0)"
-          arm64_capable="$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)"
-          echo "uname -m: $(uname -m)"
-          echo "sysctl.proc_translated: $translated"
-          echo "hw.optional.arm64: $arm64_capable"
-          if [ "$translated" = "1" ] || [ "$arm64_capable" = "1" ]; then
-            sudo softwareupdate --install-rosetta --agree-to-license || true
-          fi
-          /usr/bin/arch -x86_64 /usr/bin/true
 
       - name: Install Bazelisk
         run: |
