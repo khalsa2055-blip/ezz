@@ -178,6 +178,19 @@ chat_text = "\n".join(p.read_text() for p in chat_sources)
 if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())" not in chat_text:
     raise SystemExit("Per-dialog History context-menu routing is missing")
 
+context_menu = root / "submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift"
+if not context_menu.exists():
+    raise SystemExit(f"Missing AyuGram message context menu source: {context_menu}")
+context_menu_text = context_menu.read_text()
+for required in [
+    "AyuGram Save",
+    "AyuGram Transfer to Saved Messages",
+    "AyuGramCaptureService.saveNow(",
+    "enqueueMessages(",
+]:
+    if required not in context_menu_text:
+        raise SystemExit(f"AyuGram manual-save/transfer action missing: {required}")
+
 ui_text = ui_text.replace(
     'let title = dialogID == nil ? "AyuGram History" : "Group History"',
     'let title = "AyuGram History"',
