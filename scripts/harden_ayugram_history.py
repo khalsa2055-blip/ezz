@@ -156,7 +156,7 @@ for info_plist in plist_paths:
         checked_plist = plistlib.load(f)
     if checked_plist.get("UIFileSharingEnabled") is not True or checked_plist.get("LSSupportsOpeningDocumentsInPlace") is not True:
         raise SystemExit(f"Files app integration flags are not enabled in {info_plist}")
-print("AyuGram History hardening applied: Documents/AyuGram/History + media MIME support + Files app integration.")
+print("AyuGram History hardening v3 applied: per-dialog isolation + Saved Messages-style bubbles + real Save action + media persistence + Files integration.")
 
 # Enforce per-dialog History routing and prevent cross-chat leakage.
 ui = root / "submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift"
@@ -180,7 +180,7 @@ if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64()
 
 ui_text = ui_text.replace(
     'let title = dialogID == nil ? "AyuGram History" : "Group History"',
-    'let title = dialogID == nil ? "AyuGram History" : "History"',
+    'let title = "AyuGram History"',
     1
 )
 ui.write_text(ui_text)
