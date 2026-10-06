@@ -937,12 +937,12 @@ if "func addAyuGramHistoryAction" not in pm:
     pm = pm.replace(anchor, helper, 1)
 
 if "addAyuGramHistoryAction(&items)" not in pm:
-    matches = list(re.finditer(r"(?m)^\\s*let contextController = makeContextController\\(", pm))
+    matches = list(re.finditer(r"(?m)^\s*let contextController = makeContextController\(", pm))
     if not matches:
         raise SystemExit("PeerInfo context controller anchor not found")
     # Insert exactly once into the normal profile/media More-menu construction.
     insert_pos = matches[-1].start()
-    pm = pm[:insert_pos] + "                addAyuGramHistoryAction(&items)\\n\\n" + pm[insert_pos:]
+    pm = pm[:insert_pos] + "                addAyuGramHistoryAction(&items)\n\n" + pm[insert_pos:]
 if "addAyuGramHistoryAction(&items)" not in pm:
     raise SystemExit("PeerInfo three-dots History action insertion failed")
 peer_menu.write_text(pm)
