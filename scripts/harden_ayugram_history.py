@@ -699,3 +699,374 @@ if anchor not in smoke_text:
     raise SystemExit("Smoke test saved-copy anchor missing")
 if 'add("History → Saved copy")' not in smoke_text:
     smoke.write_text(smoke_text.replace(anchor, test + anchor, 1))
+
+
+# AyuGram History v4 requirements: sender names + deletion timestamps + peer-info More menu.
+# These changes are applied after the main patch so the final Telegram-iOS tree,
+# simulator smoke test, and AltStore IPA all receive the same behavior.
+
+# 1) Durable history metadata: sender name + exact local deletion time.
+message_text = message.read_text()
+if "public let fromName: String?" not in message_text:
+    anchor = "    public let fromID: Int64\n"
+    if anchor not in message_text:
+        raise SystemExit("AyuMessage fromID anchor not found")
+    message_text = message_text.replace(anchor, anchor + "    public let fromName: String?\n", 1)
+
+if "public let deletedAt: Int32?" not in message_text:
+    anchor = "    public let isDeleted: Bool\n"
+    if anchor not in message_text:
+        raise SystemExit("AyuMessage isDeleted anchor not found")
+    message_text = message_text.replace(anchor, anchor + "    public let deletedAt: Int32?\n", 1)
+
+if "        fromName: String? = nil," not in message_text:
+    anchor = "        fromID: Int64,\n"
+    if anchor not in message_text:
+        raise SystemExit("AyuMessage init fromID anchor not found")
+    message_text = message_text.replace(anchor, anchor + "        fromName: String? = nil,\n", 1)
+
+if "        deletedAt: Int32? = nil\n" not in message_text:
+    anchor = "        isDeleted: Bool\n"
+    if anchor not in message_text:
+        raise SystemExit("AyuMessage init isDeleted anchor not found")
+    message_text = message_text.replace(anchor, "        isDeleted: Bool,\n        deletedAt: Int32? = nil\n", 1)
+
+if "        self.fromName = fromName\n" not in message_text:
+    anchor = "        self.fromID = fromID\n"
+    if anchor not in message_text:
+        raise SystemExit("AyuMessage self.fromID anchor not found")
+    message_text = message_text.replace(anchor, anchor + "        self.fromName = fromName\n", 1)
+
+if "        self.deletedAt = deletedAt\n" not in message_text:
+    anchor = "        self.isDeleted = isDeleted\n"
+    if anchor not in message_text:
+        raise SystemExit("AyuMessage self.isDeleted anchor not found")
+    message_text = message_text.replace(anchor, anchor + "        self.deletedAt = deletedAt\n", 1)
+
+# Keep metadata when the Postbox history store creates its durable copy.
+message_text = message_text.replace(
+    "            fromID: message.fromID,\n",
+    "            fromID: message.fromID,\n            fromName: message.fromName,\n",
+)
+message_text = message_text.replace(
+    "                fromID: snapshot.fromID,\n",
+    "                fromID: snapshot.fromID,\n                fromName: snapshot.fromName,\n",
+)
+message_text = message_text.replace(
+    "            isDeleted: deleted\n",
+    "            isDeleted: deleted,\n            deletedAt: message.deletedAt\n",
+)
+message_text = message_text.replace(
+    "                isDeleted: snapshot.isDeleted\n",
+    "                isDeleted: snapshot.isDeleted,\n                deletedAt: snapshot.deletedAt\n",
+)
+message.write_text(message_text)
+
+# 2) Snapshot bridge: automatically timestamp deletion events and retain sender name.
+bridge_text = (root / "submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift").read_text()
+if "fromName: String? = nil" not in bridge_text:
+    anchor = "        accountID: Int64,\n"
+    if anchor not in bridge_text:
+        raise SystemExit("Bridge accountID anchor not found")
+    bridge_text = bridge_text.replace(anchor, anchor + "        fromName: String? = nil,\n", 1)
+bridge_text = bridge_text.replace(
+    "            fromID: authorID,\n",
+    "            fromID: authorID,\n            fromName: fromName,\n",
+)
+bridge_text = bridge_text.replace(
+    "            isDeleted: isDeleted\n",
+    "            isDeleted: isDeleted,\n            deletedAt: isDeleted ? Int32(Date().timeIntervalSince1970) : nil\n",
+)
+(root / "submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift").write_text(bridge_text)
+
+# 3) Deleted-message capture receives an explicit sender-name lookup from TelegramCore.
+capture_text = capture.read_text()
+if "senderNames: [Int32: String] = [:]" not in capture_text:
+    anchor = "        accountID: Int64\n"
+    if anchor not in capture_text:
+        raise SystemExit("Capture accountID anchor not found")
+    capture_text = capture_text.replace(anchor, "        accountID: Int64,\n        senderNames: [Int32: String] = [:]\n", 1)
+capture_text = capture_text.replace(
+    "                accountID: accountID,\n                isDeleted: true,",
+    "                accountID: accountID,\n                fromName: senderNames[message.id.id],\n                isDeleted: true,",
+)
+# Preserve sender/deletion metadata in the manual Saved copy.
+capture_text = capture_text.replace(
+    "            fromID: snapshot.fromID,\n",
+    "            fromID: snapshot.fromID,\n            fromName: snapshot.fromName,\n",
+)
+capture_text = capture_text.replace(
+    "            isDeleted: snapshot.isDeleted\n",
+    "            isDeleted: snapshot.isDeleted,\n            deletedAt: snapshot.deletedAt\n",
+)
+capture.write_text(capture_text)
+
+# 4) TelegramCore deletion path: resolve the author's display name before the
+# message is removed. This does not bypass Telegram transport/security rules.
+delete_paths = [
+    root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift",
+    root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift",
+]
+for delete_file in delete_paths:
+    if not delete_file.exists():
+        continue
+    d = delete_file.read_text()
+
+    if delete_file.name == "DeleteMessages.swift" and "var ayuSenderNames: [Int32: String] = [:]" not in d:
+        anchor = "        let messages = ids.compactMap { transaction.getMessage($0) }\n"
+        if anchor in d:
+            insertion = '''        let messages = ids.compactMap { transaction.getMessage($0) }
+        var ayuSenderNames: [Int32: String] = [:]
+        for message in messages {
+            if let author = message.author {
+                let name: String?
+                if let user = author as? TelegramUser {
+                    let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+                    name = parts.isEmpty ? nil : parts.joined(separator: " ")
+                } else if let channel = author as? TelegramChannel {
+                    name = channel.title
+                } else if let group = author as? TelegramGroup {
+                    name = group.title
+                } else {
+                    name = nil
+                }
+                if let name, !name.isEmpty {
+                    ayuSenderNames[message.id.id] = name
+                }
+            }
+        }
+'''
+            d = d.replace(anchor, insertion, 1)
+        else:
+            raise SystemExit("DeleteMessages message snapshot anchor not found")
+        d = d.replace(
+            "            accountID: ayuAccountID\n        )",
+            "            accountID: ayuAccountID,\n            senderNames: ayuSenderNames\n        )",
+            1,
+        )
+        delete_file.write_text(d)
+
+    elif delete_file.name == "AccountStateManagementUtils.swift":
+        # Interactive/automatic deletion ultimately flows through DeleteMessages,
+        # so no duplicate sender-name logic is needed here.
+        delete_file.write_text(d)
+
+# 5) Manual AyuGram Save: retain sender name and local media even when Telegram's
+# own Save/Forward action is unavailable. It still depends on media being locally available.
+context_menu = root / "submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift"
+if not context_menu.exists():
+    raise SystemExit(f"Missing chat context menu: {context_menu}")
+cm = context_menu.read_text()
+if "let ayuSenderName: String?" not in cm:
+    anchor = '''                    let snapshot = AyuGramPostboxBridge.snapshot(
+                        message: message,
+                        accountID: context.account.peerId.toInt64(),
+                        isDeleted: false
+                    )'''
+    replacement = '''                    let ayuSenderName: String? = {
+                        guard let author = message.author else {
+                            return nil
+                        }
+                        if let user = author as? TelegramUser {
+                            let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+                            return parts.isEmpty ? nil : parts.joined(separator: " ")
+                        } else if let channel = author as? TelegramChannel {
+                            return channel.title
+                        } else if let group = author as? TelegramGroup {
+                            return group.title
+                        }
+                        return nil
+                    }()
+                    let snapshot = AyuGramPostboxBridge.snapshot(
+                        message: message,
+                        accountID: context.account.peerId.toInt64(),
+                        fromName: ayuSenderName,
+                        isDeleted: false
+                    )'''
+    if anchor not in cm:
+        raise SystemExit("Manual Save snapshot anchor not found")
+    cm = cm.replace(anchor, replacement, 1)
+
+# Remove the experimental transfer action; it was not one of the two requested
+# features and can create a false-success UX for protected media.
+if 'AyuGram Transfer to Saved Messages' in cm:
+    cm = re.sub(
+        r'\n\s*actions\.append\(\.action\(ContextMenuActionItem\(text: "AyuGram Transfer to Saved Messages".*?\n\s*\}\)\)\)\n',
+        "\n",
+        cm,
+        flags=re.S,
+        count=1,
+    )
+context_menu.write_text(cm)
+
+# 6) Peer info → avatar/profile → three-dots ("More") menu now contains the
+# requested AyuGram History entry for the current group/channel/dialog.
+peer_menu = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenDisplayMediaGalleryContextMenu.swift"
+if not peer_menu.exists():
+    raise SystemExit(f"Missing PeerInfo more-menu source: {peer_menu}")
+pm = peer_menu.read_text()
+if "import AyuGramSettingsScreen" not in pm:
+    pm = pm.replace("import Foundation\n", "import Foundation\nimport AyuGramSettingsScreen\n", 1)
+
+if "func addAyuGramHistoryAction" not in pm:
+    anchor = "        let peerId = self.peerId\n"
+    helper = '''        let peerId = self.peerId
+
+        func addAyuGramHistoryAction(_ items: inout [ContextMenuItem]) {
+            items.append(.action(ContextMenuActionItem(
+                text: "AyuGram History",
+                icon: { theme in
+                    return generateTintedImage(
+                        image: UIImage(systemName: "clock.arrow.circlepath"),
+                        color: theme.contextMenu.primaryColor
+                    )
+                },
+                action: { [weak self] _, action in
+                    action(.default)
+                    guard let self else {
+                        return
+                    }
+                    let historyController = ayuGramHistoryScreen(context: self.context, dialogID: self.peerId.toInt64())
+                    self.controller?.push(historyController)
+                }
+            )))
+        }
+'''
+    if anchor not in pm:
+        raise SystemExit("PeerInfo menu peerId anchor not found")
+    pm = pm.replace(anchor, helper, 1)
+
+if "addAyuGramHistoryAction(&items)" not in pm:
+    pm = pm.replace(
+        "                let contextController = makeContextController(",
+        "                addAyuGramHistoryAction(&items)\n\n                let contextController = makeContextController(",
+    )
+    pm = pm.replace(
+        "                let contextController = makeContextController(",
+        "                addAyuGramHistoryAction(&items)\n\n                let contextController = makeContextController(",
+    )
+    # The two replacements above are intentionally idempotent enough for the
+    # current source; verify at least one insertion landed.
+if "addAyuGramHistoryAction(&items)" not in pm:
+    raise SystemExit("PeerInfo three-dots History action insertion failed")
+peer_menu.write_text(pm)
+
+# 7) History bubble UI: show real sender names and both timestamps.
+ui = root / "submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift"
+if not ui.exists():
+    raise SystemExit(f"Missing AyuGram History UI source: {ui}")
+u = ui.read_text()
+if "let senderName: String" not in u:
+    u = u.replace(
+        "    let displayKind: String\n\n    init(presentationData:",
+        "    let displayKind: String\n    let senderName: String\n\n    init(presentationData:",
+        1,
+    )
+    u = u.replace(
+        "displayDate: String, displayKind: String) {",
+        "displayDate: String, displayKind: String, senderName: String) {",
+        1,
+    )
+    u = u.replace(
+        "        self.displayKind = displayKind\n",
+        "        self.displayKind = displayKind\n        self.senderName = senderName\n",
+        1,
+    )
+u = u.replace(
+    'self.senderLabel.text = "From \\(item.message.fromID)"',
+    'self.senderLabel.text = item.senderName.isEmpty ? "From \\(item.message.fromID)" : item.senderName',
+    1,
+)
+
+# Carry sender name inside the ItemList entry.
+u = u.replace(
+    "case message(Int64, AyuMessage, String, String, String)",
+    "case message(Int64, AyuMessage, String, String, String, String)",
+    1,
+)
+u = u.replace(
+    "case let .message(id, _, _, _, _):",
+    "case let .message(id, _, _, _, _, _):",
+    1,
+)
+u = u.replace(
+    "case let (.message(aId, _, aText, aDate, aKind), .message(bId, _, bText, bDate, bKind)):",
+    "case let (.message(aId, _, aText, aDate, aKind, aSender), .message(bId, _, bText, bDate, bKind, bSender)):",
+    1,
+)
+u = u.replace(
+    "return aId == bId && aText == bText && aDate == bDate && aKind == bKind",
+    "return aId == bId && aText == bText && aDate == bDate && aKind == bKind && aSender == bSender",
+    1,
+)
+u = u.replace(
+    "case let .message(_, message, body, date, kind):",
+    "case let .message(_, message, body, date, kind, sender):",
+    1,
+)
+u = u.replace(
+    "                displayKind: kind\n            )",
+    "                displayKind: kind,\n                senderName: sender\n            )",
+    1,
+)
+
+# Display a dedicated deletion timestamp in the metadata line.
+if "let deletionDate" not in u:
+    anchor = '''        let kind = AyuHistoryDisplay.label(isDeleted: message.isDeleted, settings: settings)
+        let date = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(message.date)))
+'''
+    replacement = '''        let kind = AyuHistoryDisplay.label(isDeleted: message.isDeleted, settings: settings)
+        let date = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(message.date)))
+        let deletionDate: String? = {
+            guard let deletedAt = message.deletedAt else {
+                return nil
+            }
+            return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(deletedAt)))
+        }()
+'''
+    if anchor in u:
+        u = u.replace(anchor, replacement, 1)
+    else:
+        raise SystemExit("History date anchor not found")
+
+# Replace the entry construction with sender + deleted-at details.
+old_entry = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
+        entries.append(.message(message.fakeID, message, body, date, kind))
+'''
+new_entry = '''        let body = message.text.isEmpty ? "(media)\\(mediaLabel)" : "\\(message.text)\\(mediaLabel)"
+        let sender = message.fromName ?? ""
+        let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date
+        entries.append(.message(message.fakeID, message, body, meta, kind, sender))
+'''
+if old_entry in u:
+    u = u.replace(old_entry, new_entry, 1)
+elif ".message(message.fakeID, message, body, meta, kind, sender)" not in u:
+    # The injected history UI uses this exact construction in the current tree;
+    # fail rather than silently keeping the old ID-only view.
+    raise SystemExit("History entry construction anchor not found")
+
+ui.write_text(u)
+
+# 8) Saved metadata also records sender and deletion time.
+a = archive.read_text()
+a = a.replace(
+    '            "senderID": message.fromID,\n',
+    '            "senderID": message.fromID,\n            "senderName": message.fromName ?? "",\n',
+)
+a = a.replace(
+    '            "isDeleted": message.isDeleted\n',
+    '            "isDeleted": message.isDeleted,\n            "deletedAt": message.deletedAt as Any\n',
+)
+archive.write_text(a)
+
+# 9) Runtime/static CI assertions for the exact requested behavior.
+peer_menu_text = peer_menu.read_text()
+if "AyuGram History" not in peer_menu_text or "dialogID: self.peerId.toInt64()" not in peer_menu_text:
+    raise SystemExit("PeerInfo three-dots History integration not present")
+if "public let fromName: String?" not in message_text or "public let deletedAt: Int32?" not in message_text:
+    raise SystemExit("History sender/deletion metadata model missing")
+if "senderNames: [Int32: String]" not in capture.read_text():
+    raise SystemExit("Deleted capture sender-name contract missing")
+if 'Deleted \\($0)' not in u:
+    raise SystemExit("History deleted-at presentation missing")
+print("AyuGram History v4 applied: per-dialog Saved Messages UI + sender names + deletion timestamps + PeerInfo three-dots History + manual local-media Save.")
