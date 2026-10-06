@@ -2923,7 +2923,7 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                        accountID: context.account.peerId.toInt64(),
 +                        isDeleted: false
 +                    )
-+                    let _ = context.account.postbox.transaction { _ in
++                    let _ = (context.account.postbox.transaction { _ in
 +                        AyuGramCaptureService.saveNow(
 +                            mediaBox: context.account.postbox.mediaBox,
 +                            snapshot: snapshot,
