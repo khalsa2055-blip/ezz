@@ -1026,14 +1026,27 @@ if "let deletionDate" not in u:
         raise SystemExit("History date anchor not found")
 
 # Replace the entry construction with sender + deleted-at details.
-entry_line = "entries.append(.message(message.fakeID, message, body, date, kind))"
-if entry_line in u:
-    replacement = """let sender = message.fromName ?? ""
-        let meta = deletionDate.map { "\(date) • Deleted \($0)" } ?? date
-        entries.append(.message(message.fakeID, message, body, meta, kind, sender))"""
-    u = u.replace(entry_line, replacement, 1)
-elif ".message(message.fakeID, message, body, meta, kind, sender)" not in u:
-    raise SystemExit("History entry construction not recognized")
+entry_match = re.search(r'(?m)^(\s*)entries\.append\(\.message\(message\.fakeID, message, body, date, kind\)\)', u)
+if entry_match:
+    indent = entry_match.group(1)
+    replacement = (
+        indent + 'let sender = message.fromName ?? ""\n'
+        + indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
+        + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
+    )
+    u = u[:entry_match.start()] + replacement + u[entry_match.end():]
+else:
+    generic = re.search(r'(?m)^(\s*)entries\.append\(\.message\(message\.fakeID, message, body, ([^,]+), ([^)]+)\)\)', u)
+    if generic and generic.group(2).strip() == "date":
+        indent = generic.group(1)
+        replacement = (
+            indent + 'let sender = message.fromName ?? ""\n'
+            + indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
+            + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
+        )
+        u = u[:generic.start()] + replacement + u[generic.end():]
+    elif ".message(message.fakeID, message, body, meta, kind, sender)" not in u:
+        raise SystemExit("History entry construction not recognized")
 
 ui.write_text(u)
 
