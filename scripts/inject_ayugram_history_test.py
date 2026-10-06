@@ -28,8 +28,10 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                 do {
                                     let data = try JSONEncoder().encode(report)
                                     try data.write(to: reportURL, options: .atomic)
+                                    let historyMarker = reportURL.deletingLastPathComponent().appendingPathComponent("AyuGramHistoryPresented.txt")
+                                    try? Data("AyuGram History ready".utf8).write(to: historyMarker, options: .atomic)
                                 } catch {
-                                    print("AyuGram smoke report write failed: \\(error)")
+                                    print("AyuGram smoke report write failed: \(error)")
                                 }
                             }
 
@@ -37,11 +39,6 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                 ayuGramHistoryScreen(context: context.context),
                                 on: .root
                             )
-                            if let reportURL {
-                                let historyMarker = reportURL.deletingLastPathComponent().appendingPathComponent("AyuGramHistoryPresented.txt")
-                                try? Data("AyuGram History presented".utf8).write(to: historyMarker, options: .atomic)
-                            }
-
                         })
                     }
 
