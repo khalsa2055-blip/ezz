@@ -183,6 +183,7 @@ new file mode 100644
 @@ -0,0 +1,85 @@
 +import Foundation
 +import Postbox
++import TelegramCore
 +
 +/// Entry points used by TelegramCore just before a message is deleted or
 +/// replaced by an edit. Completed local media is copied into an AyuGram-owned
@@ -242,12 +243,8 @@ new file mode 100644
 +        message: Message,
 +        accountID: Int64
 +    ) -> Bool {
-+        guard !message.containsSecretMedia else {
-+            return false
-+        }
-+
-+        var resources: [AyuMediaResourceInfo] = []
-+        for media in message.effectiveMedia {
++        +        var resources: [AyuMediaResourceInfo] = []
++        for media in message.media {
 +            if let image = media as? TelegramMediaImage {
 +                for representation in image.representations.sorted(by: {
 +                    Int64($0.dimensions.width) * Int64($0.dimensions.height)
