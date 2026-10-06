@@ -2902,126 +2902,155 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                    })
 +                })))
 +            }
++        }
 +
++        let ayuSavableMessages = messages.filter { item in
++            !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !item.effectiveMedia.isEmpty
++        }
++        if !ayuSavableMessages.isEmpty {
 +            actions.append(.action(ContextMenuActionItem(text: "AyuGram Save", icon: { theme in
-                return generateTintedImage(image: UIImage(systemName: "tray.and.arrow.down"), color: theme.actionSheet.primaryTextColor)
-            }, action: { c, _ in
-                c?.dismiss(completion: {
-                    let accountID = context.account.peerId.toInt64()
-                    let senderName: String? = {
-                        guard let author = message.author else { return nil }
-                        if let user = author as? TelegramUser {
-                            let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
-                            return parts.isEmpty ? nil : parts.joined(separator: " ")
-                        } else if let channel = author as? TelegramChannel {
-                            return channel.title
-                        } else if let group = author as? TelegramGroup {
-                            return group.title
-                        }
-                        return nil
-                    }()
-                    let snapshot = AyuGramPostboxBridge.snapshot(
-                        message: message,
-                        accountID: accountID,
-                        fromName: senderName,
-                        isDeleted: false
-                    )
-                    let resources: [(MediaResource, AyuMediaResourceInfo, String?)] = message.effectiveMedia.flatMap { media in
-                        if let image = media as? TelegramMediaImage {
-                            return image.representations.map { representation in
-                                (representation.resource, AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"), "jpg")
-                            }
-                        } else if let file = media as? TelegramMediaFile {
-                            return [(file.resource, AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType), nil)]
-                        }
-                        return []
-                    }
-                    let saveSignal: Signal<Bool, NoError>
-                    if resources.isEmpty {
-                        saveSignal = .single(AyuGramCaptureService.saveNow(
-                            mediaBox: context.account.postbox.mediaBox,
-                            snapshot: snapshot,
-                            resources: []
-                        ))
-                    } else {
-                        let fetchSignals: [Signal<Bool, NoError>] = resources.map { resource, _, pathExtension in
-                            Signal { subscriber in
-                                let fetchedDisposable = context.account.postbox.mediaBox.fetchedResource(resource, parameters: nil).start()
-                                let dataDisposable = context.account.postbox.mediaBox.resourceData(
-                                    resource,
-                                    pathExtension: pathExtension,
-                                    option: .complete(waitUntilFetchStatus: false),
-                                    attemptSynchronously: false
-                                )
-                                |> filter { $0.complete }
-                                |> take(1)
-                                let disposable = dataDisposable.start(next: { _ in
-                                    subscriber.putNext(true)
-                                    subscriber.putCompletion()
-                                }, error: { _ in
-                                    subscriber.putNext(false)
-                                    subscriber.putCompletion()
-                                })
-                                return ActionDisposable {
-                                    fetchedDisposable.dispose()
-                                    disposable.dispose()
-                                }
-                            }
-                        }
-                        saveSignal = combineLatest(fetchSignals)
-                        |> map { states in
-                            guard states.allSatisfy({ $0 }) else { return false }
-                            return AyuGramCaptureService.saveNow(
-                                mediaBox: context.account.postbox.mediaBox,
-                                snapshot: snapshot,
-                                resources: resources.map { $0.1 }
-                            )
-                        }
-                        |> take(1)
-                    }
-                    _ = (saveSignal |> deliverOnMainQueue).startStandalone(next: { saved in
-                        let text = saved ? "Saved to AyuGram" : "AyuGram could not save this message"
-                        controllerInteraction.displayUndo(.info(title: nil, text: text, timeout: 2.0, customUndoText: nil))
-                    })
-                })
-            })))
-            actions.append(.action(ContextMenuActionItem(text: "AyuGram Transfer to Saved Messages", icon: { theme in
-+                return generateTintedImage(image: UIImage(systemName: "arrowshape.turn.up.right"), color: theme.actionSheet.primaryTextColor)
++                return generateTintedImage(image: UIImage(systemName: "tray.and.arrow.down"), color: theme.actionSheet.primaryTextColor)
 +            }, action: { c, _ in
 +                c?.dismiss(completion: {
-+                    let transferableMedia = message.effectiveMedia.filter { media in
-+                        media is TelegramMediaImage || media is TelegramMediaFile
-+                    }
-+                    var outgoing: [EnqueueMessage] = []
-+                    if transferableMedia.isEmpty {
-+                        if !message.text.isEmpty {
-+                            outgoing.append(.message(text: message.text, attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: []))
++                    let accountID = context.account.peerId.toInt64()
++                    let messageSaveGroups: [(AyuMessage, [(MediaResource, AyuMediaResourceInfo, String?)])] = ayuSavableMessages.map { item in
++                        let senderName: String? = {
++                            guard let author = item.author else { return nil }
++                            if let user = author as? TelegramUser {
++                                let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
++                                return parts.isEmpty ? nil : parts.joined(separator: " ")
++                            } else if let channel = author as? TelegramChannel {
++                                return channel.title
++                            } else if let group = author as? TelegramGroup {
++                                return group.title
++                            }
++                            return nil
++                        }()
++                        let snapshot = AyuGramPostboxBridge.snapshot(
++                            message: item,
++                            accountID: accountID,
++                            fromName: senderName,
++                            isDeleted: false
++                        )
++                        let resources: [(MediaResource, AyuMediaResourceInfo, String?)] = item.effectiveMedia.flatMap { media in
++                            if let image = media as? TelegramMediaImage,
++                               let representation = largestImageRepresentation(image.representations) {
++                                return [(
++                                    representation.resource,
++                                    AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"),
++                                    "jpg"
++                                )]
++                            } else if let file = media as? TelegramMediaFile {
++                                return [(file.resource, AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType), nil)]
++                            }
++                            return []
 +                        }
++                        return (snapshot, resources)
++                    }
++
++                    let fetchSignals: [Signal<Bool, NoError>] = messageSaveGroups.flatMap { group in
++                        group.1.map { resource, _, pathExtension in
++                            Signal { subscriber in
++                                let fetchedDisposable = context.account.postbox.mediaBox.fetchedResource(resource, parameters: nil).start()
++                                let dataDisposable = context.account.postbox.mediaBox.resourceData(
++                                    resource,
++                                    pathExtension: pathExtension,
++                                    option: .complete(waitUntilFetchStatus: false),
++                                    attemptSynchronously: false
++                                )
++                                |> filter { $0.complete }
++                                |> take(1)
++                                let disposable = dataDisposable.start(next: { _ in
++                                    subscriber.putNext(true)
++                                    subscriber.putCompletion()
++                                }, error: { _ in
++                                    subscriber.putNext(false)
++                                    subscriber.putCompletion()
++                                })
++                                return ActionDisposable {
++                                    fetchedDisposable.dispose()
++                                    disposable.dispose()
++                                }
++                            }
++                        }
++                    }
++
++                    let fetchAll: Signal<[Bool], NoError>
++                    if fetchSignals.isEmpty {
++                        fetchAll = .single([])
 +                    } else {
-+                        for (index, media) in transferableMedia.enumerated() {
-+                            outgoing.append(.message(
-+                                text: index == 0 ? message.text : "",
-+                                attributes: [],
-+                                inlineStickers: [:],
-+                                mediaReference: AnyMediaReference.standalone(media: media),
-+                                threadId: nil,
-+                                replyToMessageId: nil,
-+                                replyToStoryId: nil,
-+                                localGroupingKey: nil,
-+                                correlationId: nil,
-+                                bubbleUpEmojiOrStickersets: []
-+                            ))
++                        fetchAll = combineLatest(fetchSignals) |> take(1)
++                    }
++
++                    _ = (fetchAll |> deliverOnMainQueue).startStandalone(next: { states in
++                        var stateIndex = 0
++                        var allSaved = true
++                        for (snapshot, resources) in messageSaveGroups {
++                            var groupReady = true
++                            if !resources.isEmpty {
++                                for _ in resources {
++                                    if stateIndex >= states.count || !states[stateIndex] {
++                                        groupReady = false
++                                    }
++                                    stateIndex += 1
++                                }
++                            }
++                            if groupReady {
++                                let saved = AyuGramCaptureService.saveNow(
++                                    mediaBox: context.account.postbox.mediaBox,
++                                    snapshot: snapshot,
++                                    resources: resources.map { $0.1 }
++                                )
++                                allSaved = allSaved && saved
++                            } else {
++                                allSaved = false
++                            }
 +                        }
-+                    }
-+                    guard !outgoing.isEmpty else {
-+                        return
-+                    }
-+                    let _ = enqueueMessages(account: context.account, peerId: context.account.peerId, messages: outgoing)
-+                        .startStandalone(next: { _ in
-+                            controllerInteraction.displayUndo(.info(title: nil, text: "Transferred to Saved Messages", timeout: 2.0, customUndoText: nil))
-+                        })
++                        let text = allSaved ? "Saved to AyuGram" : "AyuGram could not save all selected messages"
++                        controllerInteraction.displayUndo(.info(title: nil, text: text, timeout: 2.0, customUndoText: nil))
++                    })
 +                })
 +            })))
++
++            if messages.count == 1 {
++                actions.append(.action(ContextMenuActionItem(text: "AyuGram Transfer to Saved Messages", icon: { theme in
++                    return generateTintedImage(image: UIImage(systemName: "arrowshape.turn.up.right"), color: theme.actionSheet.primaryTextColor)
++                }, action: { c, _ in
++                    c?.dismiss(completion: {
++                        let transferableMedia = message.effectiveMedia.filter { media in
++                            media is TelegramMediaImage || media is TelegramMediaFile
++                        }
++                        var outgoing: [EnqueueMessage] = []
++                        if transferableMedia.isEmpty {
++                            if !message.text.isEmpty {
++                                outgoing.append(.message(text: message.text, attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: []))
++                            }
++                        } else {
++                            for (index, media) in transferableMedia.enumerated() {
++                                outgoing.append(.message(
++                                    text: index == 0 ? message.text : "",
++                                    attributes: [],
++                                    inlineStickers: [:],
++                                    mediaReference: AnyMediaReference.standalone(media: media),
++                                    threadId: nil,
++                                    replyToMessageId: nil,
++                                    replyToStoryId: nil,
++                                    localGroupingKey: nil,
++                                    correlationId: nil,
++                                    bubbleUpEmojiOrStickersets: []
++                                ))
++                            }
++                        }
++                        guard !outgoing.isEmpty else {
++                            return
++                        }
++                        let _ = enqueueMessages(account: context.account, peerId: context.account.peerId, messages: outgoing)
++                            .startStandalone(next: { _ in
++                                controllerInteraction.displayUndo(.info(title: nil, text: "Transferred to Saved Messages", timeout: 2.0, customUndoText: nil))
++                            })
++                    })
++                })))
++            }
 +
 +            if !isAction {
 +                actions.append(.action(ContextMenuActionItem(text: "AyuGram History", icon: { theme in
