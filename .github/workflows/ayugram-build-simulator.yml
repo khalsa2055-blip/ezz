@@ -24,7 +24,7 @@ jobs:
   build-simulator:
     # Telegram-iOS baseline builds sim_arm64; use Apple Silicon runner so Simulator can install it directly.
     runs-on: macos-26
-    timeout-minutes: 150
+    timeout-minutes: 90
 
     steps:
       - name: Checkout workspace
@@ -278,26 +278,16 @@ jobs:
       - name: Build Telegram for iOS Simulator
         working-directory: telegram-ios
         run: |
-          set -o pipefail
-          for attempt in 1 2; do
-            echo "Simulator build attempt $attempt/2"
-            if USE_BAZEL_VERSION=8.4.2 python3 build-system/Make/Make.py \
-              --bazel="$(command -v bazelisk)" \
-              --cacheDir="$HOME/telegram-bazel-cache" \
-              build \
-              --configurationPath=build-system/ayugram-ci-configuration.json \
-              --xcodeManagedCodesigning \
-              --buildNumber=$((200000 + GITHUB_RUN_NUMBER)) \
-              --configuration=debug_sim_arm64; then
-              exit 0
-            fi
-            if [ "$attempt" -eq 1 ]; then
-              echo "First simulator build attempt failed; clearing only Bazel analysis/output state and retrying."
-              rm -rf bazel-bin bazel-out bazel-testlogs 2>/dev/null || true
-            else
-              exit 1
-            fi
-          done
+          set -euo pipefail
+          echo "Simulator build (single cached attempt)"
+          USE_BAZEL_VERSION=8.4.2 python3 build-system/Make/Make.py \
+            --bazel="$(command -v bazelisk)" \
+            --cacheDir="$HOME/telegram-bazel-cache" \
+            build \
+            --configurationPath=build-system/ayugram-ci-configuration.json \
+            --xcodeManagedCodesigning \
+            --buildNumber=200081 \
+            --configuration=debug_sim_arm64
 
       - name: Smoke-test app in iPhone Simulator
         working-directory: telegram-ios
