@@ -858,34 +858,78 @@ if not context_menu.exists():
     raise SystemExit(f"Missing chat context menu: {context_menu}")
 cm = context_menu.read_text()
 if "let ayuSenderName: String?" not in cm:
-    anchor = '''                    let snapshot = AyuGramPostboxBridge.snapshot(
-                        message: message,
-                        accountID: context.account.peerId.toInt64(),
-                        isDeleted: false
-                    )'''
-    replacement = '''                    let ayuSenderName: String? = {
-                        guard let author = message.author else {
-                            return nil
-                        }
-                        if let user = author as? TelegramUser {
-                            let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
-                            return parts.isEmpty ? nil : parts.joined(separator: " ")
-                        } else if let channel = author as? TelegramChannel {
-                            return channel.title
-                        } else if let group = author as? TelegramGroup {
-                            return group.title
-                        }
-                        return nil
-                    }()
-                    let snapshot = AyuGramPostboxBridge.snapshot(
-                        message: message,
-                        accountID: context.account.peerId.toInt64(),
-                        fromName: ayuSenderName,
-                        isDeleted: false
-                    )'''
-    if anchor not in cm:
-        raise SystemExit("Manual Save snapshot anchor not found")
-    cm = cm.replace(anchor, replacement, 1)
+    # Support both the original single-message Save implementation and the
+    # newer multi-message/grouped-media implementation.
+    import re
+    snapshot_pattern = re.compile(
+        r'''(?ms)([ 	]+)let snapshot = AyuGramPostboxBridge\.snapshot\(\n'''
+        r'''\1    message: message,\n'''
+        r'''\1    accountID: context\.account\.peerId\.toInt64\(\),\n'''
+        r'''(?:\1    fromName: [^\n]+,\n)?'''
+        r'''\1    isDeleted: false\n'''
+        r'''\1\)'''
+    )
+    match = snapshot_pattern.search(cm)
+    if not match:
+        # The multi-message version uses "item" instead of "message".
+        snapshot_pattern = re.compile(
+            r'''(?ms)([ 	]+)let snapshot = AyuGramPostboxBridge\.snapshot\(\n'''
+            r'''\1    message: item,\n'''
+            r'''\1    accountID: accountID,\n'''
+            r'''(?:\1    fromName: [^\n]+,\n)?'''
+            r'''\1    isDeleted: false\n'''
+            r'''\1\)'''
+        )
+        match = snapshot_pattern.search(cm)
+
+    if not match:
+        raise SystemExit("Manual Save snapshot anchor not found in current TelegramUI implementation")
+
+    indent = match.group(1)
+    original_call = match.group(0)
+    if "message: item" in original_call:
+        replacement = f'''{indent}let ayuSenderName: String? = {{
+{indent}    guard let author = item.author else {{
+{indent}        return nil
+{indent}    }}
+{indent}    if let user = author as? TelegramUser {{
+{indent}        let parts = [user.firstName, user.lastName].compactMap {{ $0 }}.filter {{ !$0.isEmpty }}
+{indent}        return parts.isEmpty ? nil : parts.joined(separator: " ")
+{indent}    }} else if let channel = author as? TelegramChannel {{
+{indent}        return channel.title
+{indent}    }} else if let group = author as? TelegramGroup {{
+{indent}        return group.title
+{indent}    }}
+{indent}    return nil
+{indent}}}()
+{indent}let snapshot = AyuGramPostboxBridge.snapshot(
+{indent}    message: item,
+{indent}    accountID: accountID,
+{indent}    fromName: ayuSenderName,
+{indent}    isDeleted: false
+{indent})'''
+    else:
+        replacement = f'''{indent}let ayuSenderName: String? = {{
+{indent}    guard let author = message.author else {{
+{indent}        return nil
+{indent}    }}
+{indent}    if let user = author as? TelegramUser {{
+{indent}        let parts = [user.firstName, user.lastName].compactMap {{ $0 }}.filter {{ !$0.isEmpty }}
+{indent}        return parts.isEmpty ? nil : parts.joined(separator: " ")
+{indent}    }} else if let channel = author as? TelegramChannel {{
+{indent}        return channel.title
+{indent}    }} else if let group = author as? TelegramGroup {{
+{indent}        return group.title
+{indent}    }}
+{indent}    return nil
+{indent}}}()
+{indent}let snapshot = AyuGramPostboxBridge.snapshot(
+{indent}    message: message,
+{indent}    accountID: context.account.peerId.toInt64(),
+{indent}    fromName: ayuSenderName,
+{indent}    isDeleted: false
+{indent})'''
+    cm = cm[:match.start()] + replacement + cm[match.end():]
 
 # Remove the experimental transfer action; it was not one of the two requested
 # features and can create a false-success UX for protected media.
