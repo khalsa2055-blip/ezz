@@ -937,16 +937,12 @@ if "func addAyuGramHistoryAction" not in pm:
     pm = pm.replace(anchor, helper, 1)
 
 if "addAyuGramHistoryAction(&items)" not in pm:
-    pm = pm.replace(
-        "                let contextController = makeContextController(",
-        "                addAyuGramHistoryAction(&items)\n\n                let contextController = makeContextController(",
-    )
-    pm = pm.replace(
-        "                let contextController = makeContextController(",
-        "                addAyuGramHistoryAction(&items)\n\n                let contextController = makeContextController(",
-    )
-    # The two replacements above are intentionally idempotent enough for the
-    # current source; verify at least one insertion landed.
+    matches = list(re.finditer(r"(?m)^\\s*let contextController = makeContextController\\(", pm))
+    if not matches:
+        raise SystemExit("PeerInfo context controller anchor not found")
+    # Insert exactly once into the normal profile/media More-menu construction.
+    insert_pos = matches[-1].start()
+    pm = pm[:insert_pos] + "                addAyuGramHistoryAction(&items)\\n\\n" + pm[insert_pos:]
 if "addAyuGramHistoryAction(&items)" not in pm:
     raise SystemExit("PeerInfo three-dots History action insertion failed")
 peer_menu.write_text(pm)
@@ -1055,7 +1051,7 @@ a = a.replace(
 )
 a = a.replace(
     '            "isDeleted": message.isDeleted\n',
-    '            "isDeleted": message.isDeleted,\n            "deletedAt": message.deletedAt as Any\n',
+    '            "isDeleted": message.isDeleted,\n            "deletedAt": message.deletedAt.map { NSNumber(value: $0) } ?? NSNull()\n',
 )
 archive.write_text(a)
 
@@ -1067,6 +1063,11 @@ if "public let fromName: String?" not in message_text or "public let deletedAt: 
     raise SystemExit("History sender/deletion metadata model missing")
 if "senderNames: [Int32: String]" not in capture.read_text():
     raise SystemExit("Deleted capture sender-name contract missing")
+if context_menu_text.count("AyuGram Save") != 1:
+    raise SystemExit("Manual AyuGram Save action must exist exactly once")
+save_tail = context_menu_text.split("AyuGram Save", 1)[1].split("})))", 1)[0]
+if "isCopyProtected()" in save_tail or "containsSecretMedia" in save_tail:
+    raise SystemExit("Manual AyuGram Save must not reuse Telegram copy-protection gate")
 if 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
 print("AyuGram History v4 applied: per-dialog Saved Messages UI + sender names + deletion timestamps + PeerInfo three-dots History + manual local-media Save.")
