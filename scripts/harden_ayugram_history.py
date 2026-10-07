@@ -123,8 +123,7 @@ archive.write_text(s)
 
 # Add a durable existence check used by the UI/tests before offering a media item.
 s = archive.read_text()
-needle = '''public enum AyuGramMediaArchive {
-    public static func archive('''
+enum_needle = '''public enum AyuGramMediaArchive {'''
 replacement = '''public enum AyuGramMediaArchive {
     public static func isArchivedFile(_ path: String?) -> Bool {
         guard let path, !path.isEmpty else { return false }
@@ -132,9 +131,11 @@ replacement = '''public enum AyuGramMediaArchive {
     }
 
     public static func archive('''
-if needle not in s:
-    raise SystemExit("Archive declaration anchor not found")
-archive.write_text(s.replace(needle, replacement, 1))
+if enum_needle not in s:
+    raise SystemExit("AyuGramMediaArchive enum anchor not found")
+if "public static func isArchivedFile(_ path: String?) -> Bool" not in s:
+    s = s.replace(enum_needle, replacement, 1)
+archive.write_text(s)
 
 # Preserve media metadata through the Postbox history copy. This prevents a
 # successful capture from being reduced to a text-only row.
