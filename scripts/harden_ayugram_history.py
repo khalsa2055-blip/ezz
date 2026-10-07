@@ -943,11 +943,14 @@ if 'AyuGram Transfer to Saved Messages' in cm:
     )
 # The pinned Telegram-iOS baseline exposes accountPeer as an optional EnginePeer.
 # Keep the optional-safe expression after the AyuGram patch.
-cm = cm.replace("let isPremium = accountPeer.isPremium", "let isPremium = accountPeer?.isPremium ?? false")
+cm = cm.replace("let isPremium = accountPeer?.isPremium ?? false", "let isPremium = accountPeer.isPremium")
 # TelegramUI exposes media resources as TelegramMediaResource, not the internal
 # MediaResource protocol name used by the initial multi-photo implementation.
 cm = cm.replace("[(MediaResource, AyuMediaResourceInfo, String?)]", "[(TelegramMediaResource, AyuMediaResourceInfo, String?)]")
 cm = cm.replace("[(MediaResource, AyuMediaResourceInfo, String?)] =", "[(TelegramMediaResource, AyuMediaResourceInfo, String?)] =")
+# Force optional tuple elements explicitly so Swift does not infer the image branch as non-optional String.
+cm = cm.replace(`                                    "jpg"\n                                )`, `                                    "jpg" as String?\n                                )`)
+cm = cm.replace(`file.mimeType), nil)]`, `file.mimeType), nil as String?)]`)
 context_menu.write_text(cm)
 
 # 6) Peer info → avatar/profile → three-dots ("More") menu now contains the
