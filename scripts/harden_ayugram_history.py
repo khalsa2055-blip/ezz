@@ -175,8 +175,6 @@ for required in [
 # the exact controller source file.
 chat_sources = list((root / "submodules/TelegramUI").rglob("*.swift"))
 chat_text = "\n".join(p.read_text() for p in chat_sources)
-if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())" not in chat_text:
-    raise SystemExit("Per-dialog History context-menu routing is missing")
 
 context_menu = root / "submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift"
 if not context_menu.exists():
@@ -1295,6 +1293,15 @@ if 'AyuGram Transfer to Saved Messages' in cm:
     )
 # The pinned Telegram-iOS baseline exposes accountPeer as an optional EnginePeer.
 # Keep the optional-safe expression after the AyuGram patch.
+# The baseline History action opens the global screen. Route it to the
+# current dialog so the visible menu always shows the correct chat history.
+cm = cm.replace(
+    "ayuGramHistoryScreen(context: context)",
+    "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())"
+)
+if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())" not in cm:
+    raise SystemExit("Per-dialog History routing could not be installed")
+
 cm = cm.replace("let isPremium = accountPeer.isPremium", "let isPremium = accountPeer?.isPremium ?? false")
 # TelegramUI exposes media resources as TelegramMediaResource, not the internal
 # MediaResource protocol name used by the initial multi-photo implementation.
