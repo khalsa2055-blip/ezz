@@ -382,6 +382,95 @@ new file mode 100644
 +/// Copies completed, non-protected Telegram media into an AyuGram-owned
 +/// history folder before the original message/resource can be removed.
 +public enum AyuGramMediaArchive {
++    public static func saveToSaved(message: AyuMessage) -> Bool {
++        guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
++            .appendingPathComponent("Telegram", isDirectory: true)
++            .appendingPathComponent("AyuGram", isDirectory: true)
++            .appendingPathComponent("Saved", isDirectory: true) else {
++            return false
++        }
++
++        let mediaRoot = root.appendingPathComponent("Media", isDirectory: true)
++        let messagesRoot = root.appendingPathComponent("Messages", isDirectory: true)
++        do {
++            try FileManager.default.createDirectory(at: mediaRoot, withIntermediateDirectories: true)
++            try FileManager.default.createDirectory(at: messagesRoot, withIntermediateDirectories: true)
++        } catch {
++            return false
++        }
++
++        var didSave = false
++        if let source = message.mediaPath, FileManager.default.fileExists(atPath: source) {
++            let sourceURL = URL(fileURLWithPath: source)
++            let sourceDirectory = sourceURL.deletingLastPathComponent()
++            let files = ((try? FileManager.default.contentsOfDirectory(
++                at: sourceDirectory,
++                includingPropertiesForKeys: [.isRegularFileKey],
++                options: [.skipsHiddenFiles]
++            )) ?? []).filter { url in
++                url.pathExtension.lowercased() != "json" &&
++                ((try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true)
++            }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
++
++            if files.count > 1 {
++                for (index, file) in files.enumerated() {
++                    let ext = file.pathExtension.isEmpty ? (Self.pathExtension(for: message.mimeType) ?? "bin") : file.pathExtension
++                    let destination = mediaRoot.appendingPathComponent("media-\(index + 1).\(ext)")
++                    do {
++                        if !FileManager.default.fileExists(atPath: destination.path) {
++                            try FileManager.default.copyItem(at: file, to: destination)
++                        }
++                        didSave = true
++                    } catch {
++                        return false
++                    }
++                }
++            } else {
++                let ext = sourceURL.pathExtension.isEmpty ? (Self.pathExtension(for: message.mimeType) ?? "bin") : sourceURL.pathExtension
++                let destination = mediaRoot.appendingPathComponent("media.\(ext)")
++                do {
++                    if !FileManager.default.fileExists(atPath: destination.path) {
++                        try FileManager.default.copyItem(at: sourceURL, to: destination)
++                    }
++                    didSave = true
++                } catch {
++                    return false
++                }
++            }
++        }
++
++        if !message.text.isEmpty, let data = message.text.data(using: .utf8) {
++            do {
++                try data.write(to: messagesRoot.appendingPathComponent("message-\(message.messageID).txt"), options: .atomic)
++                didSave = true
++            } catch {
++                return false
++            }
++        }
++
++        let metadata: [String: Any] = [
++            "messageID": message.messageID,
++            "dialogID": message.dialogID,
++            "accountID": message.userID,
++            "senderID": message.fromID,
++            "senderName": message.fromName ?? "",
++            "date": message.date,
++            "editDate": message.editDate,
++            "deletedAt": message.deletedAt.map { NSNumber(value: $0) } ?? NSNull(),
++            "mimeType": message.mimeType ?? "",
++            "text": message.text,
++            "isDeleted": message.isDeleted
++        ]
++        do {
++            let data = try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])
++            try data.write(to: messagesRoot.appendingPathComponent("message-\(message.messageID).json"), options: .atomic)
++            didSave = true
++        } catch {
++            return false
++        }
++        return didSave
++    }
++
 +    public static func archive(
 +        mediaBox: MediaBox,
 +        accountID: Int64,
