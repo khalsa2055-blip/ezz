@@ -129,8 +129,7 @@ replacement = '''public enum AyuGramMediaArchive {
         guard let path, !path.isEmpty else { return false }
         return FileManager.default.fileExists(atPath: path)
     }
-
-    public static func archive('''
+'''
 if enum_needle not in s:
     raise SystemExit("AyuGramMediaArchive enum anchor not found")
 if "public static func isArchivedFile(_ path: String?) -> Bool" not in s:
