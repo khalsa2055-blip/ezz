@@ -353,7 +353,8 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
         return didSave
     }
 
-'''m pathlib import Path
+'''
+from pathlib import Path
 import plistlib
 import re
 
