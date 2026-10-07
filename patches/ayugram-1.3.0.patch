@@ -3133,7 +3133,7 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +        }, action: { c, _ in
 +            c?.dismiss(completion: {
 +                controllerInteraction.navigationController()?.pushViewController(
-+                    ayuGramHistoryScreen(context: context),
++                    ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64()),
 +                    animated: true
 +                )
 +            })
