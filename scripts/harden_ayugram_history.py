@@ -226,20 +226,18 @@ test += '''        add("History → Saved media set") {
             try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-            let first = tempRoot.appendingPathComponent("0.jpg")
-            let second = tempRoot.appendingPathComponent("1.mp4")
+            let first = tempRoot.appendingPathComponent("media-1.jpg")
+            let second = tempRoot.appendingPathComponent("media-2.mp4")
             try Data("one".utf8).write(to: first, options: .atomic)
             try Data("two".utf8).write(to: second, options: .atomic)
 
             let message = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID, peerID: dialogID, fromID: accountID, messageID: messageID, date: Int32(Date().timeIntervalSince1970), text: "AyuGram media-set smoke", mediaPath: first.path, mimeType: "image/jpeg", isDeleted: true)
             let saved = AyuGramMediaArchive.saveToSaved(message: message)
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
                 .appendingPathComponent("Saved", isDirectory: true)
-                .appendingPathComponent(String(accountID), isDirectory: true)
-                .appendingPathComponent(String(dialogID), isDirectory: true)
-                .appendingPathComponent(String(messageID), isDirectory: true)
-                .appendingPathComponent("media", isDirectory: true)
+                .appendingPathComponent("Media", isDirectory: true)
             let firstSaved = savedRoot?.appendingPathComponent("0.jpg")
             let secondSaved = savedRoot?.appendingPathComponent("1.mp4")
             let ok = saved
@@ -272,13 +270,11 @@ test += '''        add("History → Saved media set") {
             )
             let saved = AyuGramMediaArchive.saveToSaved(message: message)
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
                 .appendingPathComponent("Saved", isDirectory: true)
-                .appendingPathComponent(String(accountID), isDirectory: true)
-                .appendingPathComponent(String(dialogID), isDirectory: true)
-                .appendingPathComponent(String(messageID), isDirectory: true)
-            let savedMedia = savedRoot?.appendingPathComponent("media.jpg")
-            let savedMetadata = savedRoot?.appendingPathComponent("metadata.json")
+            let savedMedia = savedRoot?.appendingPathComponent("Media").appendingPathComponent("media.jpg")
+            let savedMetadata = savedRoot?.appendingPathComponent("Messages").appendingPathComponent("message-\\(messageID).json")
             let ok = saved
                 && (savedMedia.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (savedMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
@@ -593,12 +589,10 @@ test += '''        add("History → Saved media set") {
             let message = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID, peerID: dialogID, fromID: accountID, messageID: messageID, date: Int32(Date().timeIntervalSince1970), text: "AyuGram media-set smoke", mediaPath: first.path, mimeType: "image/jpeg", isDeleted: true)
             let saved = AyuGramMediaArchive.saveToSaved(message: message)
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
                 .appendingPathComponent("Saved", isDirectory: true)
-                .appendingPathComponent(String(accountID), isDirectory: true)
-                .appendingPathComponent(String(dialogID), isDirectory: true)
-                .appendingPathComponent(String(messageID), isDirectory: true)
-                .appendingPathComponent("media", isDirectory: true)
+                .appendingPathComponent("Media", isDirectory: true)
             let firstSaved = savedRoot?.appendingPathComponent("0.jpg")
             let secondSaved = savedRoot?.appendingPathComponent("1.mp4")
             let ok = saved
@@ -631,11 +625,9 @@ test += '''        add("History → Saved media set") {
             )
             let saved = AyuGramMediaArchive.saveToSaved(message: message)
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
                 .appendingPathComponent("Saved", isDirectory: true)
-                .appendingPathComponent(String(accountID), isDirectory: true)
-                .appendingPathComponent(String(dialogID), isDirectory: true)
-                .appendingPathComponent(String(messageID), isDirectory: true)
             let savedMedia = savedRoot?.appendingPathComponent("media.jpg")
             let savedMetadata = savedRoot?.appendingPathComponent("metadata.json")
             let ok = saved
