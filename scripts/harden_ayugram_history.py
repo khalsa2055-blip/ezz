@@ -1130,14 +1130,18 @@ ui.write_text(u)
 
 # 8) Saved metadata also records sender and deletion time.
 a = archive.read_text()
-a = a.replace(
-    '            "senderID": message.fromID,\n',
-    '            "senderID": message.fromID,\n            "senderName": message.fromName ?? "",\n',
-)
-a = a.replace(
-    '            "isDeleted": message.isDeleted\n',
-    '            "isDeleted": message.isDeleted,\n            "deletedAt": message.deletedAt.map { NSNumber(value: $0) } ?? NSNull()\n',
-)
+if '"senderName": message.fromName ?? "",' not in a:
+    a = a.replace(
+        '            "senderID": message.fromID,\n',
+        '            "senderID": message.fromID,\n            "senderName": message.fromName ?? "",\n',
+        1,
+    )
+if '"deletedAt": message.deletedAt.map { NSNumber(value: $0) } ?? NSNull()' not in a:
+    a = a.replace(
+        '            "isDeleted": message.isDeleted\n',
+        '            "isDeleted": message.isDeleted,\n            "deletedAt": message.deletedAt.map { NSNumber(value: $0) } ?? NSNull()\n',
+        1,
+    )
 archive.write_text(a)
 
 # 9) Runtime/static CI assertions for the exact requested behavior.
