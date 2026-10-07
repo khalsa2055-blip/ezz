@@ -3036,16 +3036,19 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                })))
 +            }
 +
-+            if !isAction {
-+                actions.append(.action(ContextMenuActionItem(text: "AyuGram History", icon: { theme in
-+                    return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Search"), color: theme.actionSheet.primaryTextColor)
-+                }, action: { c, _ in
-+                    c?.dismiss(completion: {
-+                        controllerInteraction.navigationController()?.pushViewController(ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64()), animated: true)
-+                    })
-+                })))
-+            }
 +        }
++
++        // Always expose the full AyuGram History list from the message menu.
++        actions.append(.action(ContextMenuActionItem(text: "AyuGram History", icon: { theme in
++            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Search"), color: theme.actionSheet.primaryTextColor)
++        }, action: { c, _ in
++            c?.dismiss(completion: {
++                controllerInteraction.navigationController()?.pushViewController(
++                    ayuGramHistoryScreen(context: context),
++                    animated: true
++                )
++            })
++        })))
  
          if isSharedMediaPolls && messages.count == 1 {
              actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.SharedMedia_ViewInChat, icon: { theme in
