@@ -66,43 +66,60 @@ s = s.replace(
 )
 
 # Support common audio/document/video extensions instead of collapsing them to .bin.
-old = '''        case "video/quicktime":
-            return "mov"
-        default:
+s = archive.read_text()
+switch_start = '    private static func pathExtension(for mimeType: String?) -> String? {'
+start = s.find(switch_start)
+if start < 0:
+    raise SystemExit("Media extension helper not found")
+default_marker = '''        default:
             return nil
         }'''
-new = '''        case "video/quicktime":
-            return "mov"
-        case "audio/mpeg":
+end = s.find(default_marker, start)
+if end < 0:
+    raise SystemExit("Media extension default branch not found")
+
+required_cases = [
+    '''        case "audio/mpeg":
             return "mp3"
-        case "audio/mp4":
+''',
+    '''        case "audio/mp4":
             return "m4a"
-        case "audio/aac":
+''',
+    '''        case "audio/aac":
             return "aac"
-        case "audio/ogg":
+''',
+    '''        case "audio/ogg":
             return "ogg"
-        case "audio/wav", "audio/x-wav":
+''',
+    '''        case "audio/wav", "audio/x-wav":
             return "wav"
-        case "application/pdf":
+''',
+    '''        case "application/pdf":
             return "pdf"
-        case "application/zip":
+''',
+    '''        case "application/zip":
             return "zip"
-        case "text/plain":
+''',
+    '''        case "text/plain":
             return "txt"
-        case "application/msword":
+''',
+    '''        case "application/msword":
             return "doc"
-        case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+''',
+    '''        case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             return "docx"
-        case "application/vnd.ms-excel":
+''',
+    '''        case "application/vnd.ms-excel":
             return "xls"
-        case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+''',
+    '''        case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
             return "xlsx"
-        default:
-            return nil
-        }'''
-if old not in s:
-    raise SystemExit("Media extension switch anchor not found")
-archive.write_text(s.replace(old, new, 1))
+'''
+]
+existing = s[start:end]
+missing = required_cases.filter(c => !existing.includes(c.trim()));
+if (missing.length) s = s.slice(0, end) + missing.join("") + s.slice(end);
+archive.write_text(s)
 
 # Add a durable existence check used by the UI/tests before offering a media item.
 s = archive.read_text()
