@@ -2950,9 +2950,6 @@ diff --git a/submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift 
 +                                let disposable = dataDisposable.start(next: { _ in
 +                                    subscriber.putNext(true)
 +                                    subscriber.putCompletion()
-+                                }, error: { _ in
-+                                    subscriber.putNext(false)
-+                                    subscriber.putCompletion()
 +                                })
 +                                return ActionDisposable {
 +                                    fetchedDisposable.dispose()
