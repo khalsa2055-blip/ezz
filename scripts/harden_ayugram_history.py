@@ -117,8 +117,9 @@ required_cases = [
 '''
 ]
 existing = s[start:end]
-missing = required_cases.filter(c => !existing.includes(c.trim()));
-if (missing.length) s = s.slice(0, end) + missing.join("") + s.slice(end);
+missing = [case for case in required_cases if case.strip() not in existing]
+if missing:
+    s = s[:end] + "".join(missing) + s[end:]
 archive.write_text(s)
 
 # Add a durable existence check used by the UI/tests before offering a media item.
