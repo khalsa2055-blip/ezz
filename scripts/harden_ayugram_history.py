@@ -941,6 +941,13 @@ if 'AyuGram Transfer to Saved Messages' in cm:
         flags=re.S,
         count=1,
     )
+# The upstream TelegramUI baseline may expose accountPeer as a non-optional EnginePeer.
+# Normalize the expression after the AyuGram patch so both baseline variants compile.
+cm = cm.replace("let isPremium = accountPeer?.isPremium ?? false", "let isPremium = accountPeer.isPremium")
+# TelegramUI exposes media resources as TelegramMediaResource, not the internal
+# MediaResource protocol name used by the initial multi-photo implementation.
+cm = cm.replace("[(MediaResource, AyuMediaResourceInfo, String?)]", "[(TelegramMediaResource, AyuMediaResourceInfo, String?)]")
+cm = cm.replace("[(MediaResource, AyuMediaResourceInfo, String?)] =", "[(TelegramMediaResource, AyuMediaResourceInfo, String?)] =")
 context_menu.write_text(cm)
 
 # 6) Peer info → avatar/profile → three-dots ("More") menu now contains the
