@@ -393,7 +393,7 @@ new file mode 100644
 +            return (nil, nil)
 +        }
 +
-+        guard let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
++        guard let baseURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
 +            .appendingPathComponent("AyuGram", isDirectory: true)
 +            .appendingPathComponent("History", isDirectory: true)
 +            .appendingPathComponent(String(accountID), isDirectory: true)
