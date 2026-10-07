@@ -941,9 +941,9 @@ if 'AyuGram Transfer to Saved Messages' in cm:
         flags=re.S,
         count=1,
     )
-# The upstream TelegramUI baseline may expose accountPeer as a non-optional EnginePeer.
-# Normalize the expression after the AyuGram patch so both baseline variants compile.
-cm = cm.replace("let isPremium = accountPeer?.isPremium ?? false", "let isPremium = accountPeer.isPremium")
+# The pinned Telegram-iOS baseline exposes accountPeer as an optional EnginePeer.
+# Keep the optional-safe expression after the AyuGram patch.
+cm = cm.replace("let isPremium = accountPeer.isPremium", "let isPremium = accountPeer?.isPremium ?? false")
 # TelegramUI exposes media resources as TelegramMediaResource, not the internal
 # MediaResource protocol name used by the initial multi-photo implementation.
 cm = cm.replace("[(MediaResource, AyuMediaResourceInfo, String?)]", "[(TelegramMediaResource, AyuMediaResourceInfo, String?)]")
