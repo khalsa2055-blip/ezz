@@ -147,4 +147,6 @@ if "AyuGram standalone smoke report written" not in s:
         raise SystemExit("AppDelegate launch anchor not found")
     s = s.replace(launch_anchor, launch_anchor + "\n" + standalone_hook, 1)
 
+s = "\n".join(line.rstrip() for line in s.splitlines()) + "\n"
+
 p.write_text(s, encoding="utf-8")
