@@ -1530,8 +1530,7 @@ diff --git a/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.s
                  var generatedEvent: (reactionAuthor: Peer, reaction: MessageReaction.Reaction, message: Message, timestamp: Int32)?
 +                if let previousMessage = transaction.getMessage(id),
 +                   let editedAttribute = message.attributes.compactMap({ $0 as? EditedMessageAttribute }).first,
-+                   !editedAttribute.isHidden,
-+                   true {
++                   !editedAttribute.isHidden {
 +                    var mediaCapture: AyuMessageMediaCapture?
 +                    if !previousMessage.isCopyProtected(), !previousMessage.containsSecretMedia {
 +                        var resources: [AyuMediaResourceInfo] = []
