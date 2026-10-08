@@ -207,8 +207,10 @@ jobs:
               "Message Shot renderer": "AyuMessageShotRenderer.render",
               "Zalgo/bidi sanitizer": "AyuTextSanitizer.filterZalgo",
               "Translation service": "class AyuGramTranslationService",
-              "AyuGram Settings": "AyuGram Preferences",
-              "History screen": "View AyuGram History",
+              "AyuGram Settings core": "struct AyuSettings",
+              "History screen": "ayuGramHistoryScreen(context: context, dialogID:",
+              "Manual AyuGram Save": "AyuGramCaptureService.saveNow(",
+              "Automatic History Postbox persistence": "AyuGramPostboxHistoryStore.appendDeleted",
           }
 
           missing = [name for name, marker in required.items() if marker not in text]
