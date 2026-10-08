@@ -226,7 +226,23 @@ smoke = root / "submodules/AyuGramIOS/Sources/AyuGramSmokeTest.swift"
 if not smoke.exists():
     raise SystemExit(f"Missing AyuGram smoke test: {smoke}")
 smoke_text = smoke.read_text()
-anchor = '        add("history display labels") {'
+anchor = '        add("History media storage boundary") {
+            let documentsRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Telegram", isDirectory: true)
+            let supportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("AyuGram", isDirectory: true)
+                .appendingPathComponent("History", isDirectory: true)
+            let documentsPath = documentsRoot?.standardizedFileURL.path ?? ""
+            let supportPath = supportRoot?.standardizedFileURL.path ?? ""
+            let appSupportPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.standardizedFileURL.path ?? ""
+            let ok = !documentsPath.isEmpty
+                && !supportPath.isEmpty
+                && supportPath.hasPrefix(appSupportPath)
+                && !supportPath.hasPrefix(documentsPath)
+            return (ok, ok ? "automatic History media stays app-private; Documents is reserved for explicit Save" : "History media storage boundary failed")
+        }
+
+        add("history display labels") {'
 test = '''        add("per-dialog history isolation") {
             let firstDialog: Int64 = 900_000_000 + Int64(abs(accountID % 10_000))
             let secondDialog = firstDialog + 777
@@ -562,7 +578,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 context: nil
             )
             let bodyHeight = max(20.0, ceil(bodyRect.height))
-            let hasMedia = item.message.mediaPath != nil && !item.message.mediaPath!.isEmpty
+            let hasMedia = AyuGramMediaArchive.isArchivedFile(item.message.mediaPath)
             let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
             let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
             let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 24.0 + 8.0
@@ -830,6 +846,12 @@ delete_paths = [
     root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift",
     root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift",
 ]
+# Automatic History media: capture one largest photo representation per image,
+# while retaining videos/files as individual resources. This avoids storing
+# thumbnails and alternate photo sizes redundantly.
+automatic_media_old = "                if let image = media as? TelegramMediaImage {\n                    for representation in image.representations.sorted(by: {\n                        Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                            > Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                    }) {\n                        resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                    }\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
+automatic_media_new = "                if let image = media as? TelegramMediaImage,\n                   let representation = image.representations.max(by: {\n                       Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                           < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                   }) {\n                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
+
 for delete_file in delete_paths:
     if not delete_file.exists():
         continue
@@ -867,11 +889,19 @@ for delete_file in delete_paths:
             "            accountID: ayuAccountID,\n            senderNames: ayuSenderNames\n        )",
             1,
         )
+        if automatic_media_old in d:
+            d = d.replace(automatic_media_old, automatic_media_new, 1)
+        elif "AyuMediaResourceInfo" in d and "TelegramMediaImage" in d and "TelegramMediaFile" in d and "for representation in image.representations.sorted" in d:
+            raise SystemExit(f"Automatic History photo capture anchor missing in {delete_file}")
         delete_file.write_text(d)
 
     elif delete_file.name == "AccountStateManagementUtils.swift":
         # Interactive/automatic deletion ultimately flows through DeleteMessages,
         # so no duplicate sender-name logic is needed here.
+        if automatic_media_old in d:
+            d = d.replace(automatic_media_old, automatic_media_new, 1)
+        elif "AyuMediaResourceInfo" in d and "TelegramMediaImage" in d and "TelegramMediaFile" in d and "for representation in image.representations.sorted" in d:
+            raise SystemExit(f"Automatic History photo capture anchor missing in {delete_file}")
         delete_file.write_text(d)
 
 # 5) Manual AyuGram Save: retain sender name and local media even when Telegram's
@@ -1186,6 +1216,31 @@ if "isCopyProtected()" in save_tail or "containsSecretMedia" in save_tail:
 if 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
 
+# Automatic History must archive media privately and persist message/text history in Postbox.
+# It must never write text into the visible Saved files unless the user explicitly taps Save.
+capture_text = capture.read_text()
+deleted_capture = capture_text.split("public static func saveNow", 1)[0]
+edited_capture = capture_text.split("public static func captureEdited", 1)[1]
+
+if "AyuGramMediaArchive.archive(" not in deleted_capture:
+    raise SystemExit("Automatic deleted-media History archive call is missing")
+if "AyuGramPostboxHistoryStore.appendDeleted" not in deleted_capture:
+    raise SystemExit("Deleted-message Postbox History persistence is missing")
+if "saveToSaved" in deleted_capture:
+    raise SystemExit("Automatic deleted-message capture must not write to Saved")
+if "AyuGramMediaArchive.archive(" not in edited_capture:
+    raise SystemExit("Automatic edited-media History archive call is missing")
+if "AyuGramPostboxHistoryStore.appendEdited" not in edited_capture:
+    raise SystemExit("Edited-message Postbox History persistence is missing")
+if "saveToSaved" in edited_capture:
+    raise SystemExit("Automatic edited-message capture must not write to Saved")
+
+# Manual Save contract remains untouched and must still route through the existing API.
+if context_menu_text.count("AyuGram Save") != 1:
+    raise SystemExit("Manual AyuGram Save action disappeared")
+if context_menu_text.count("AyuGramCaptureService.saveNow(") != 1:
+    raise SystemExit("Manual AyuGram Save API wiring disappeared")
+
 # History media is private app data, never the user-visible Documents tree.
 media_archive_text = archive.read_text()
 if '.documentDirectory' in media_archive_text[media_archive_text.find('public static func archive'):]:
@@ -1194,4 +1249,4 @@ if '.applicationSupportDirectory' not in media_archive_text:
     raise SystemExit("Automatic History media must use Application Support")
 if '.appendingPathComponent("History", isDirectory: true)' not in media_archive_text:
     raise SystemExit("Automatic History storage path missing")
-print("AyuGram History v4 applied: per-dialog Saved Messages UI + sender names + deletion timestamps + PeerInfo three-dots History + manual local-media Save.")
+print("AyuGram History v5 applied: per-dialog History + automatic app-private media capture + largest-photo selection; manual Save preserved.")
