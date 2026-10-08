@@ -1111,8 +1111,7 @@ if 'text: "AyuGram History"' not in more_text:
 '''
     if anchor not in more_text:
         raise SystemExit("Header More-menu items anchor not found")
-    more_text = more_text.replace(anchor, anchor + "
-" + history_action, 1)
+        more_text = more_text.replace(anchor, anchor + "\n" + history_action, 1)
 
 if more_text.count('text: "AyuGram History"') != 1:
     raise SystemExit("Header More-menu must contain exactly one AyuGram History action")
