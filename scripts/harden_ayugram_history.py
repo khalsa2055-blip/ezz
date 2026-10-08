@@ -188,17 +188,23 @@ for required in [
     if required not in ui_text:
         raise SystemExit(f"Per-dialog History UI contract missing: {required}")
 
-# The context-menu entry lives in TelegramUI, so locate it without assuming
-# the exact controller source file.
-chat_sources = list((root / "submodules/TelegramUI").rglob("*.swift"))
-chat_text = "\n".join(p.read_text() for p in chat_sources)
-if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())" not in chat_text:
-    raise SystemExit("Per-dialog History context-menu routing is missing")
-
+# The context-menu entry lives in TelegramUI. Normalize the action to the
+# per-dialog History screen before validating it, so formatting or a previous
+# global-history call cannot silently break the routing contract.
 context_menu = root / "submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift"
 if not context_menu.exists():
     raise SystemExit(f"Missing AyuGram message context menu source: {context_menu}")
 context_menu_text = context_menu.read_text()
+if "ayuGramHistoryScreen(context: context" not in context_menu_text:
+    raise SystemExit("AyuGram History context-menu action is missing")
+context_menu_text = context_menu_text.replace(
+    "ayuGramHistoryScreen(context: context)",
+    "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())"
+)
+context_menu.write_text(context_menu_text)
+if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())" not in context_menu_text:
+    raise SystemExit("Per-dialog History context-menu routing is missing")
+
 for required in [
     "AyuGram Save",
     "AyuGram Transfer to Saved Messages",
@@ -207,6 +213,7 @@ for required in [
 ]:
     if required not in context_menu_text:
         raise SystemExit(f"AyuGram manual-save/transfer action missing: {required}")
+
 
 ui_text = ui_text.replace(
     'let title = dialogID == nil ? "AyuGram History" : "Group History"',
