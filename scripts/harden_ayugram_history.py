@@ -52,19 +52,8 @@ for p in (archive, message, store, capture):
     if not p.exists():
         raise SystemExit(f"Missing AyuGram history source: {p}")
 
-# Files.app exposes the app's Documents directory. Keep history outside
-# Telegram's managed media directory so Telegram deletion cannot remove it.
-s = archive.read_text()
-s = s.replace(
-    'FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?',
-    'FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?'
-)
-s = s.replace(
-    '.appendingPathComponent("AyuGram", isDirectory: true)',
-    '.appendingPathComponent("AyuGram", isDirectory: true)',
-    1
-)
-
+# Automatic History media stays in Application Support (private app data).
+# The visible Documents tree is reserved for explicit manual Save.
 # Support common audio/document/video extensions instead of collapsing them to .bin.
 s = archive.read_text()
 switch_start = '    private static func pathExtension(for mimeType: String?) -> String? {'
