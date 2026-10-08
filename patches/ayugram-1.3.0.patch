@@ -1531,7 +1531,7 @@ diff --git a/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.s
 +                if let previousMessage = transaction.getMessage(id),
 +                   let editedAttribute = message.attributes.compactMap({ $0 as? EditedMessageAttribute }).first,
 +                   !editedAttribute.isHidden,
-+                   (previousMessage.text != message.text || previousMessage.media.count != message.media.count) {
++                   true {
 +                    var mediaCapture: AyuMessageMediaCapture?
 +                    if !previousMessage.isCopyProtected(), !previousMessage.containsSecretMedia {
 +                        var resources: [AyuMediaResourceInfo] = []
