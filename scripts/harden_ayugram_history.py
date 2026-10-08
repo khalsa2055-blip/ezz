@@ -1132,13 +1132,13 @@ if "import AyuGramSettingsScreen" not in settings_text:
         1,
     )
 
-global_history_action = '''    items[.extra]!.append(PeerInfoScreenDisclosureItem(
+global_history_action = '''    items[.extra]!.append(PeerInfoScreenActionItem(
         id: 900,
         text: "AyuGram History",
-        icon: UIImage(bundleImageName: "Settings/Archives"),
+        icon: UIImage(systemName: "clock.arrow.circlepath"),
         action: {
             let controller = ayuGramHistoryScreen(context: context)
-            interaction.pushController(controller)
+            context.sharedContext.mainWindow?.present(controller, on: .root)
         }
     ))
 
