@@ -44,7 +44,7 @@ hook = """                    self.mainWindow.viewController = context.rootContr
 
 """
 
-if "-AyuGramFullSmokeTest" not in s:
+if "AyuGram History ready" not in s:
     s = s.replace(anchor, hook, 1)
 
 launch_anchor = "        let launchStartTime = CFAbsoluteTimeGetCurrent()"
