@@ -226,23 +226,7 @@ smoke = root / "submodules/AyuGramIOS/Sources/AyuGramSmokeTest.swift"
 if not smoke.exists():
     raise SystemExit(f"Missing AyuGram smoke test: {smoke}")
 smoke_text = smoke.read_text()
-anchor = '        add("history display labels") {
-            let documentsRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-                .appendingPathComponent("Telegram", isDirectory: true)
-            let supportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-                .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("History", isDirectory: true)
-            let documentsPath = documentsRoot?.standardizedFileURL.path ?? ""
-            let supportPath = supportRoot?.standardizedFileURL.path ?? ""
-            let appSupportPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.standardizedFileURL.path ?? ""
-            let ok = !documentsPath.isEmpty
-                && !supportPath.isEmpty
-                && supportPath.hasPrefix(appSupportPath)
-                && !supportPath.hasPrefix(documentsPath)
-            return (ok, ok ? "automatic History media stays app-private; Documents is reserved for explicit Save" : "History media storage boundary failed")
-        }
-
-        add("history display labels") {'
+anchor = '        add("history display labels") {'
 test = '''        add("History media storage boundary") {
             let documentsRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Telegram", isDirectory: true)
