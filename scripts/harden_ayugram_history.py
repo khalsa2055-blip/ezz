@@ -1155,6 +1155,22 @@ if '"deletedAt": message.deletedAt.map { NSNumber(value: $0) } ?? NSNull()' not 
 archive.write_text(a)
 
 # 9) Runtime/static CI assertions for the exact requested behavior.
+
+# Keep the user-facing Telegram settings screen free of the old AyuGram Preferences
+# entry now that History is exposed directly from message/peer menus.
+peer_settings_items = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift"
+peer_settings_actions = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift"
+peer_screen = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift"
+for path in [peer_settings_items, peer_settings_actions, peer_screen]:
+    if not path.exists():
+        raise SystemExit(f"Missing PeerInfo settings source: {path}")
+if "AyuGram Preferences" in peer_settings_items.read_text() or "openSettings(.ayuGram)" in peer_settings_items.read_text():
+    raise SystemExit("Old AyuGram Preferences menu entry is still exposed")
+if "case .ayuGram:" in peer_settings_actions.read_text():
+    raise SystemExit("Old AyuGram Preferences navigation route is still exposed")
+if "case ayuGram" in peer_screen.read_text():
+    raise SystemExit("Old AyuGram Preferences settings case is still exposed")
+
 peer_menu_text = peer_menu.read_text()
 if "AyuGram History" not in peer_menu_text or "dialogID: self.peerId.toInt64()" not in peer_menu_text or 'UIImage(bundleImageName: "Chat/Context Menu/Save")' not in peer_menu_text:
     raise SystemExit("PeerInfo three-dots History integration not present")
