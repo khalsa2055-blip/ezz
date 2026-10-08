@@ -262,8 +262,8 @@ test += '''        add("History → Saved media set") {
                 .appendingPathComponent("AyuGram", isDirectory: true)
                 .appendingPathComponent("Saved", isDirectory: true)
                 .appendingPathComponent("Media", isDirectory: true)
-            let firstSaved = savedRoot?.appendingPathComponent("0.jpg")
-            let secondSaved = savedRoot?.appendingPathComponent("1.mp4")
+            let firstSaved = savedRoot?.appendingPathComponent("message-\\(messageID)-media-1.jpg")
+            let secondSaved = savedRoot?.appendingPathComponent("message-\\(messageID)-media-2.mp4")
             let ok = saved
                 && (firstSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (secondSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
@@ -297,8 +297,8 @@ test += '''        add("History → Saved media set") {
                 .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
                 .appendingPathComponent("Saved", isDirectory: true)
-            let savedMedia = savedRoot?.appendingPathComponent("media.jpg")
-            let savedMetadata = savedRoot?.appendingPathComponent("metadata.json")
+            let savedMedia = savedRoot?.appendingPathComponent("Media").appendingPathComponent("message-\\(messageID)-media.jpg")
+            let savedMetadata = savedRoot?.appendingPathComponent("Messages").appendingPathComponent("message-\\(messageID).json")
             let ok = saved
                 && (savedMedia.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (savedMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
