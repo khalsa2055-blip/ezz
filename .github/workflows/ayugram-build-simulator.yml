@@ -72,9 +72,30 @@ jobs:
 
       - name: Clone Telegram-iOS baseline
         run: |
-          git clone --recursive https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
+          # Clone the baseline first, then initialize submodules individually.
+          # The pinned Telegram-iOS tree references an rlottie commit that is no
+          # longer fetchable from TelegramMessenger/rlottie (upload-pack: not our ref).
+          git clone https://github.com/TelegramMessenger/Telegram-iOS.git telegram-ios
           cd telegram-ios
           git checkout --detach 6ad963e5b62d354da79040f388ae2b9132fb17b8
+          git submodule sync --recursive
+
+          while IFS= read -r module_entry; do
+            module_path="${module_entry#* }"
+            if [ "$module_path" = "submodules/rlottie/rlottie" ]; then
+              echo "Skipping unavailable pinned rlottie gitlink: $module_path"
+              continue
+            fi
+            echo "Initializing submodule: $module_path"
+            git submodule update --init --recursive --jobs 4 -- "$module_path"
+          done < <(git config -f .gitmodules --get-regexp path)
+
+          # Use the latest commit that is actually present in the official rlottie
+          # repository, rather than the unreachable gitlink above.
+          rm -rf submodules/rlottie/rlottie
+          git clone https://github.com/TelegramMessenger/rlottie.git submodules/rlottie/rlottie
+          git -C submodules/rlottie/rlottie checkout --detach 67f103bc8b625f2a4a9e94f1d8c7bd84c5a08d1d
+          echo "rlottie revision: $(git -C submodules/rlottie/rlottie rev-parse HEAD)"
 
       - name: Check Telegram baseline
         working-directory: telegram-ios
