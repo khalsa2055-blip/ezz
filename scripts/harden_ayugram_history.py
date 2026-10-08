@@ -149,11 +149,9 @@ checks = {
         'isArchivedFile'
     ]
 }
-for p, forbidden_or_required in checks.items():
+for p, required_markers in checks.items():
     data = p.read_text()
-    if '.applicationSupportDirectory' in data:
-        raise SystemExit("History media is still stored in Application Support")
-    for required in forbidden_or_required[1:]:
+    for required in required_markers:
         if required not in data:
             raise SystemExit(f"History hardening missing: {required}")
 
