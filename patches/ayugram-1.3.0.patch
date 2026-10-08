@@ -2649,7 +2649,6 @@ diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/Pe
      case emojiStatus
      case profileColor
      case powerSaving
-+    case ayuGram
      case businessSetup
      case profile
      case premiumManagement
@@ -2665,8 +2664,6 @@ diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/Pe
              self.interaction.editingOpenNameColorSetup()
          case .powerSaving:
              push(energySavingSettingsScreen(context: self.context))
-+        case .ayuGram:
-+            push(ayuGramSettingsScreen(context: self.context))
          case .businessSetup:
              guard let controller = self.controller, !controller.presentAccountFrozenInfoIfNeeded() else {
                  return
@@ -2679,10 +2676,6 @@ diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/Pe
              }))
          }
          
-+        items[.myProfile]!.append(PeerInfoScreenDisclosureItem(id: 30, text: "AyuGram Preferences", icon: UIImage(systemName: "star"), action: {
-+            interaction.openSettings(.ayuGram)
-+        }))
-+
          items[.myProfile]!.append(PeerInfoScreenDisclosureItem(id: 0, text: presentationData.strings.Settings_MyProfile, icon: PresentationResourcesSettings.myProfile, action: {
              interaction.openSettings(.profile)
          }))
