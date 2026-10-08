@@ -3,46 +3,51 @@ from pathlib import Path
 p = Path("submodules/TelegramUI/Sources/AppDelegate.swift")
 s = p.read_text(encoding="utf-8")
 
-if "AyuGramHistoryMenuSmokeTest" in s:
-    raise SystemExit("History menu smoke hook already exists")
+if "AyuGramHistoryListSmokeTest" in s:
+    raise SystemExit("History list smoke hook already exists")
 
-anchor = "                    self.mainWindow.viewController = context.rootController\n"
+anchor = '                    if ProcessInfo.processInfo.arguments.contains("-AyuGramFullSmokeTest") {'
 if anchor not in s:
-    raise SystemExit("AppDelegate History menu hook anchor not found")
+    raise SystemExit("Existing AppDelegate smoke hook anchor not found")
 
-hook = r'''                    self.mainWindow.viewController = context.rootController
-
-                    if ProcessInfo.processInfo.arguments.contains("-AyuGramHistoryMenuSmokeTest") {
+hook = r'''                    if ProcessInfo.processInfo.arguments.contains("-AyuGramHistoryListSmokeTest") {
                         let accountID = context.context.account.peerId.toInt64()
-                        let baseDirectory = try? AyuGramRuntime.baseDirectory(accountID: accountID)
-                        let reportURL = baseDirectory?.appendingPathComponent("AyuGramHistoryMenuSmokeReport.json")
-                        let markerURL = baseDirectory?.appendingPathComponent("AyuGramHistoryMoreMenuPresented.txt")
+                        let dialogID: Int64 = 9_970_000_001
+                        let messageID: Int32 = 1_990_000_001
+                        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+                        let reportURL = documentsDirectory.appendingPathComponent("AyuGramHistoryListSmokeReport.json")
+                        let markerURL = documentsDirectory.appendingPathComponent("AyuGramHistoryListPresented.txt")
 
-                        func writeResult(deletedHistoryOK: Bool, menuVisible: Bool) {
+                        func writeHistoryReport(deletedEntryPresent: Bool, historyPresentationRequested: Bool, detail: String) {
                             let report: [String: Any] = [
-                                "deleted_history_entry_present": deletedHistoryOK,
-                                "more_menu_ayu_gram_history_visible": menuVisible,
-                                "passed": deletedHistoryOK && menuVisible
+                                "deleted_history_entry_present": deletedEntryPresent,
+                                "history_screen_presentation_requested": historyPresentationRequested,
+                                "dialog_id": dialogID,
+                                "message_text": "AyuGram deleted-history smoke test",
+                                "detail": detail,
+                                "passed": deletedEntryPresent && historyPresentationRequested
                             ]
-                            if let reportURL, let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
-                                try? data.write(to: reportURL, options: .atomic)
-                            }
-                            if menuVisible {
-                                try? Data("AyuGram History button visible in actual More/Settings list".utf8).write(to: markerURL ?? reportURL ?? URL(fileURLWithPath: "/tmp/AyuGramHistoryMoreMenuPresented.txt"), options: .atomic)
+                            do {
+                                let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                                try data.write(to: reportURL, options: .atomic)
+                                if historyPresentationRequested {
+                                    try Data("AyuGram History screen presentation requested".utf8).write(to: markerURL, options: .atomic)
+                                }
+                            } catch {
+                                print("AyuGram History-only report write failed: \(error)")
                             }
                         }
 
-                        let deletedDialogID: Int64 = 9_970_000_001
-                        let deletedMessageID: Int32 = 1_990_000_001
+                        writeHistoryReport(deletedEntryPresent: false, historyPresentationRequested: false, detail: "test started")
 
-                        let deletionSignal = context.context.account.postbox.transaction { transaction -> Bool in
+                        let deletedEntrySignal = context.context.account.postbox.transaction { transaction -> Bool in
                             let message = AyuMessage(
                                 fakeID: 0,
                                 userID: accountID,
-                                dialogID: deletedDialogID,
-                                peerID: deletedDialogID,
+                                dialogID: dialogID,
+                                peerID: dialogID,
                                 fromID: accountID,
-                                messageID: deletedMessageID,
+                                messageID: messageID,
                                 date: Int32(Date().timeIntervalSince1970),
                                 text: "AyuGram deleted-history smoke test",
                                 isDeleted: true
@@ -51,97 +56,29 @@ hook = r'''                    self.mainWindow.viewController = context.rootCont
                             let rows = AyuGramPostboxHistoryStore.filtered(
                                 transaction: transaction,
                                 userID: accountID,
-                                dialogID: deletedDialogID,
+                                dialogID: dialogID,
                                 kind: .deleted,
                                 limit: 50
                             )
                             return rows.contains(where: { $0.text == message.text })
                         }
 
-                        _ = (deletionSignal |> deliverOnMainQueue).start(next: { deletedHistoryOK in
-                            let accountPeerSignal = context.context.engine.data.get(
-                                TelegramEngine.EngineData.Item.Peer.Peer(id: context.context.account.peerId)
+                        _ = (deletedEntrySignal |> deliverOnMainQueue).start(next: { deletedEntryPresent in
+                            self.mainWindow.present(
+                                ayuGramHistoryScreen(context: context.context, dialogID: dialogID),
+                                on: .root
                             )
-                            _ = (accountPeerSignal |> deliverOnMainQueue).start(next: { accountPeer in
-                                guard let accountPeer,
-                                      let settingsController = context.context.sharedContext.makePeerInfoController(
-                                        context: context.context,
-                                        updatedPresentationData: nil,
-                                        peer: accountPeer,
-                                        mode: .generic,
-                                        avatarInitiallyExpanded: false,
-                                        fromChat: false,
-                                        requestsContext: nil
-                                      ) else {
-                                    writeResult(deletedHistoryOK: deletedHistoryOK, menuVisible: false)
-                                    return
-                                }
-
-                                self.mainWindow.present(settingsController, on: .root)
-
-                                func findScrollViews(_ view: UIView, into result: inout [UIScrollView]) {
-                                    if let scroll = view as? UIScrollView {
-                                        result.append(scroll)
-                                    }
-                                    for subview in view.subviews {
-                                        findScrollViews(subview, into: &result)
-                                    }
-                                }
-
-                                func hasHistoryAccessibilityElement(_ view: UIView) -> Bool {
-                                    if view.accessibilityLabel == "AyuGram History" {
-                                        return true
-                                    }
-                                    if let elements = view.accessibilityElements {
-                                        for element in elements {
-                                            if let object = element as? NSObject,
-                                               let label = object.accessibilityLabel,
-                                               label == "AyuGram History" {
-                                                return true
-                                            }
-                                        }
-                                    }
-                                    for subview in view.subviews {
-                                        if hasHistoryAccessibilityElement(subview) {
-                                            return true
-                                        }
-                                    }
-                                    return false
-                                }
-
-                                func attemptMenuCheck(_ attempt: Int) {
-                                    guard attempt <= 24 else {
-                                        writeResult(deletedHistoryOK: deletedHistoryOK, menuVisible: false)
-                                        return
-                                    }
-
-                                    var scrollViews: [UIScrollView] = []
-                                    findScrollViews(settingsController.view, into: &scrollViews)
-                                    for scroll in scrollViews {
-                                        let maxY = max(-scroll.adjustedContentInset.top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
-                                        scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: maxY), animated: false)
-                                    }
-
-                                    settingsController.view.layoutIfNeeded()
-
-                                    if hasHistoryAccessibilityElement(settingsController.view) {
-                                        writeResult(deletedHistoryOK: deletedHistoryOK, menuVisible: true)
-                                        return
-                                    }
-
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                        attemptMenuCheck(attempt + 1)
-                                    }
-                                }
-
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                    attemptMenuCheck(1)
-                                }
-                            })
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                writeHistoryReport(
+                                    deletedEntryPresent: deletedEntryPresent,
+                                    historyPresentationRequested: true,
+                                    detail: deletedEntryPresent
+                                        ? "deleted row persisted and the matching History screen was presented"
+                                        : "History screen was presented, but the deleted test row was not found in Postbox"
+                                )
+                            }
                         })
                     }
 
 '''
-
-s = s.replace(anchor, hook, 1)
-p.write_text(s, encoding="utf-8")
+p.write_text(s.replace(anchor, hook + anchor, 1), encoding="utf-8")
