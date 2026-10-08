@@ -2654,7 +2654,7 @@ diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/Pe
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
-@@ -15,6 +15,7 @@
+@@ -15,6 +15,6 @@
  import InstantPageCache
  
  extension PeerInfoScreenNode {
