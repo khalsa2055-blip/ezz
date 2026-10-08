@@ -379,8 +379,9 @@ new file mode 100644
 +import Foundation
 +import Postbox
 +
-+/// Copies completed, non-protected Telegram media into an AyuGram-owned
-+/// history folder before the original message/resource can be removed.
++/// Copies completed, non-protected Telegram media into an app-private AyuGram
++/// history folder before the original message/resource can be removed. The
++/// user-visible Saved folders are populated only by an explicit Save action.
 +public enum AyuGramMediaArchive {
 +    public static func saveToSaved(message: AyuMessage) -> Bool {
 +        guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
@@ -482,7 +483,7 @@ new file mode 100644
 +            return (nil, nil)
 +        }
 +
-+        guard let baseURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
++        guard let supportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
 +            .appendingPathComponent("AyuGram", isDirectory: true)
 +            .appendingPathComponent("History", isDirectory: true)
 +            .appendingPathComponent(String(accountID), isDirectory: true)
