@@ -1066,7 +1066,61 @@ if "addAyuGramHistoryAction(&items)" not in pm:
     raise SystemExit("PeerInfo three-dots History action insertion failed")
 peer_menu.write_text(pm)
 
+# 6b) The profile/group header three-dots menu is implemented in
+# PeerInfoScreenPerformButtonAction.swift (not the media-gallery helper above).
+# Put History directly into the same `items` array used by the visible More
+# popup shown from the header button. This is the menu used for groups/channels
+# (Boost / Report / Clear Messages / Leave).
+more_menu_marker='''submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenPerformButtonAction.swift'''
+more_menu = root / more_menu_marker
+if not more_menu.exists():
+    raise SystemExit(f"Missing PeerInfo header More-menu source: {more_menu}")
+more_text = more_menu.read_text()
+
+if "import AyuGramSettingsScreen" not in more_text:
+    more_text = more_text.replace("import Foundation\n", "import Foundation\nimport AyuGramSettingsScreen\n", 1)
+
+history_action = '''                items.append(.action(ContextMenuActionItem(
+                    text: "AyuGram History",
+                    icon: { theme in
+                        return generateTintedImage(
+                            image: UIImage(bundleImageName: "Chat/Context Menu/Save"),
+                            color: theme.contextMenu.primaryColor
+                        )
+                    },
+                    action: { [weak self] _, f in
+                        f(.dismissWithoutContent)
+                        guard let self else {
+                            return
+                        }
+                        self.controller?.push(
+                            ayuGramHistoryScreen(
+                                context: self.context,
+                                dialogID: self.peerId.toInt64()
+                            )
+                        )
+                    }
+                )))
+'''
+
+if "text: "AyuGram History"" not in more_text:
+    anchor = '''                var items: [ContextMenuItem] = []
+                guard let strongSelf = self else {
+                    return .single(items)
+                }
+'''
+    if anchor not in more_text:
+        raise SystemExit("Header More-menu items anchor not found")
+    more_text = more_text.replace(anchor, anchor + "
+" + history_action, 1)
+
+if more_text.count('text: "AyuGram History"') != 1:
+    raise SystemExit("Header More-menu must contain exactly one AyuGram History action")
+
+more_menu.write_text(more_text)
+
 # 7) History bubble UI: show real sender names and both timestamps.
+
 ui = root / "submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift"
 if not ui.exists():
     raise SystemExit(f"Missing AyuGram History UI source: {ui}")
