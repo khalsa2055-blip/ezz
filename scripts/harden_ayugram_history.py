@@ -1185,4 +1185,13 @@ if "isCopyProtected()" in save_tail or "containsSecretMedia" in save_tail:
     raise SystemExit("Manual AyuGram Save must not reuse Telegram copy-protection gate")
 if 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
+
+# History media is private app data, never the user-visible Documents tree.
+media_archive_text = archive.read_text()
+if '.documentDirectory' in media_archive_text[media_archive_text.find('public static func archive'):]:
+    raise SystemExit("Automatic History media must not use Documents")
+if '.applicationSupportDirectory' not in media_archive_text:
+    raise SystemExit("Automatic History media must use Application Support")
+if '.appendingPathComponent("History", isDirectory: true)' not in media_archive_text:
+    raise SystemExit("Automatic History storage path missing")
 print("AyuGram History v4 applied: per-dialog Saved Messages UI + sender names + deletion timestamps + PeerInfo three-dots History + manual local-media Save.")
