@@ -226,7 +226,7 @@ smoke = root / "submodules/AyuGramIOS/Sources/AyuGramSmokeTest.swift"
 if not smoke.exists():
     raise SystemExit(f"Missing AyuGram smoke test: {smoke}")
 smoke_text = smoke.read_text()
-anchor = '        add("History media storage boundary") {
+anchor = '        add("history display labels") {
             let documentsRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Telegram", isDirectory: true)
             let supportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
@@ -243,7 +243,23 @@ anchor = '        add("History media storage boundary") {
         }
 
         add("history display labels") {'
-test = '''        add("per-dialog history isolation") {
+test = '''        add("History media storage boundary") {
+            let documentsRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Telegram", isDirectory: true)
+            let supportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("AyuGram", isDirectory: true)
+                .appendingPathComponent("History", isDirectory: true)
+            let documentsPath = documentsRoot?.standardizedFileURL.path ?? ""
+            let supportPath = supportRoot?.standardizedFileURL.path ?? ""
+            let appSupportPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.standardizedFileURL.path ?? ""
+            let ok = !documentsPath.isEmpty
+                && !supportPath.isEmpty
+                && supportPath.hasPrefix(appSupportPath)
+                && !supportPath.hasPrefix(documentsPath)
+            return (ok, ok ? "automatic History media stays app-private; Documents is reserved for explicit Save" : "History media storage boundary failed")
+        }
+
+        add("per-dialog history isolation") {
             let firstDialog: Int64 = 900_000_000 + Int64(abs(accountID % 10_000))
             let secondDialog = firstDialog + 777
             let isolationMessageIDBase = Int32(1_800_000_000) + abs(Int32(accountID % 10_000))
@@ -1249,4 +1265,4 @@ if '.applicationSupportDirectory' not in media_archive_text:
     raise SystemExit("Automatic History media must use Application Support")
 if '.appendingPathComponent("History", isDirectory: true)' not in media_archive_text:
     raise SystemExit("Automatic History storage path missing")
-print("AyuGram History v5 applied: per-dialog History + automatic app-private media capture + largest-photo selection; manual Save preserved.")
+print("AyuGram History v5 applied: per-dialog History + automatic app-private media capture + largest-photo selection + storage-boundary checks; manual Save preserved.")
