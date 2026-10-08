@@ -993,7 +993,7 @@ if "func addAyuGramHistoryAction" not in pm:
                 text: "AyuGram History",
                 icon: { theme in
                     return generateTintedImage(
-                        image: UIImage(systemName: "clock.arrow.circlepath"),
+                        image: UIImage(bundleImageName: "Chat/Context Menu/Save"),
                         color: theme.contextMenu.primaryColor
                     )
                 },
@@ -1146,7 +1146,7 @@ archive.write_text(a)
 
 # 9) Runtime/static CI assertions for the exact requested behavior.
 peer_menu_text = peer_menu.read_text()
-if "AyuGram History" not in peer_menu_text or "dialogID: self.peerId.toInt64()" not in peer_menu_text:
+if "AyuGram History" not in peer_menu_text or "dialogID: self.peerId.toInt64()" not in peer_menu_text or 'UIImage(bundleImageName: "Chat/Context Menu/Save")' not in peer_menu_text:
     raise SystemExit("PeerInfo three-dots History integration not present")
 if "public let fromName: String?" not in message_text or "public let deletedAt: Int32?" not in message_text:
     raise SystemExit("History sender/deletion metadata model missing")
