@@ -126,7 +126,9 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
                 && (textMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
             add("History → Saved text copy", textOK, "text + metadata copied to Messages")
             
-            try? mediaRoot.map { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+            if let mediaRoot {
+                try? FileManager.default.removeItem(at: mediaRoot.deletingLastPathComponent())
+            }
             
             let now = Int64(Date().timeIntervalSince1970 * 1000.0)
             let report = AyuGramSmokeTestReport(version: AyuGramRuntime.version, accountID: 0, startedAt: now, finishedAt: now, items: items)
