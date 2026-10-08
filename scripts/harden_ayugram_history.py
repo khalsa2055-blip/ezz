@@ -318,20 +318,23 @@ save_anchor = '''    public static func archive(
 '''
 save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Telegram", isDirectory: true)
             .appendingPathComponent("AyuGram", isDirectory: true)
             .appendingPathComponent("Saved", isDirectory: true)
-            .appendingPathComponent(String(message.userID), isDirectory: true)
-            .appendingPathComponent(String(message.dialogID), isDirectory: true)
-            .appendingPathComponent(String(message.messageID), isDirectory: true)
         guard let root else { return false }
 
+        let mediaRoot = root.appendingPathComponent("Media", isDirectory: true)
+        let messagesRoot = root.appendingPathComponent("Messages", isDirectory: true)
         do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: mediaRoot, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: messagesRoot, withIntermediateDirectories: true)
         } catch {
             return false
         }
 
         var didSave = false
+        let filePrefix = "message-\\(message.messageID)"
+
         if let source = message.mediaPath, FileManager.default.fileExists(atPath: source) {
             let sourceURL = URL(fileURLWithPath: source)
             let sourceDirectory = sourceURL.deletingLastPathComponent()
@@ -347,7 +350,7 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
             if resourceFiles.count > 1 {
                 for (index, file) in resourceFiles.enumerated() {
                     let ext = file.pathExtension.isEmpty ? (pathExtension(for: message.mimeType) ?? "bin") : file.pathExtension
-                    let destination = root.appendingPathComponent("media-\\(index + 1).\\(ext)")
+                    let destination = mediaRoot.appendingPathComponent("\\(filePrefix)-media-\\(index + 1).\\(ext)")
                     do {
                         if !FileManager.default.fileExists(atPath: destination.path) {
                             try FileManager.default.copyItem(at: file, to: destination)
@@ -359,7 +362,7 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
                 }
             } else {
                 let ext = sourceURL.pathExtension.isEmpty ? (pathExtension(for: message.mimeType) ?? "bin") : sourceURL.pathExtension
-                let destination = root.appendingPathComponent("media.\\(ext)")
+                let destination = mediaRoot.appendingPathComponent("\\(filePrefix)-media.\\(ext)")
                 do {
                     if !FileManager.default.fileExists(atPath: destination.path) {
                         try FileManager.default.copyItem(at: sourceURL, to: destination)
@@ -373,7 +376,7 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
 
         if !message.text.isEmpty, let data = message.text.data(using: .utf8) {
             do {
-                try data.write(to: root.appendingPathComponent("message.txt"), options: .atomic)
+                try data.write(to: messagesRoot.appendingPathComponent("\\(filePrefix).txt"), options: .atomic)
                 didSave = true
             } catch {
                 return false
@@ -393,7 +396,7 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
         ]
         do {
             let data = try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: root.appendingPathComponent("metadata.json"), options: .atomic)
+            try data.write(to: messagesRoot.appendingPathComponent("\\(filePrefix).json"), options: .atomic)
             didSave = true
         } catch {
             return false
