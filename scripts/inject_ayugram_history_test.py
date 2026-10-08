@@ -63,40 +63,71 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
             let accountID: Int64 = 922337203
             let dialogID: Int64 = 933000001
             let messageID: Int32 = 1700000001
-            let temp = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-standalone-smoke.jpg")
-            try? Data("ayugram-smoke-media".utf8).write(to: temp, options: .atomic)
-            let message = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID, peerID: dialogID, fromID: accountID, messageID: messageID, date: Int32(Date().timeIntervalSince1970), text: "standalone saved media", mediaPath: temp.path, mimeType: "image/jpeg", isDeleted: true)
+
+            // Verify the actual user-facing Saved layout:
+            // Documents/Telegram/AyuGram/Saved/Media
+            // Documents/Telegram/AyuGram/Saved/Messages
+            let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Telegram", isDirectory: true)
+                .appendingPathComponent("AyuGram", isDirectory: true)
+                .appendingPathComponent("Saved", isDirectory: true)
+            let mediaRoot = savedRoot?.appendingPathComponent("Media", isDirectory: true)
+            let messagesRoot = savedRoot?.appendingPathComponent("Messages", isDirectory: true)
+
+            let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-standalone-smoke-media", isDirectory: true)
+            try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+            let firstMedia = tempRoot.appendingPathComponent("0.jpg")
+            let secondMedia = tempRoot.appendingPathComponent("1.mp4")
+            try? Data("ayugram-smoke-photo".utf8).write(to: firstMedia, options: .atomic)
+            try? Data("ayugram-smoke-video".utf8).write(to: secondMedia, options: .atomic)
+
+            let message = AyuMessage(
+                fakeID: 0,
+                userID: accountID,
+                dialogID: dialogID,
+                peerID: dialogID,
+                fromID: accountID,
+                messageID: messageID,
+                date: Int32(Date().timeIntervalSince1970),
+                text: "standalone saved media",
+                mediaPath: firstMedia.path,
+                mimeType: "image/jpeg",
+                isDeleted: true
+            )
             let savedMedia = AyuGramMediaArchive.saveToSaved(message: message)
-            let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("AyuGram", isDirectory: true).appendingPathComponent("Saved", isDirectory: true).appendingPathComponent(String(accountID), isDirectory: true).appendingPathComponent(String(dialogID), isDirectory: true).appendingPathComponent(String(messageID), isDirectory: true)
-            let mediaFileExists: Bool
-            let mediaMetadataExists: Bool
-            if let root {
-                mediaFileExists = FileManager.default.fileExists(atPath: root.appendingPathComponent("media.jpg").path)
-                mediaMetadataExists = FileManager.default.fileExists(atPath: root.appendingPathComponent("metadata.json").path)
-            } else {
-                mediaFileExists = false
-                mediaMetadataExists = false
-            }
-            let mediaOK = savedMedia && mediaFileExists && mediaMetadataExists
-            add("History → Saved media copy", mediaOK, "media + metadata copied")
-            try? FileManager.default.removeItem(at: root ?? temp)
+            let firstSaved = mediaRoot?.appendingPathComponent("media-1.jpg")
+            let secondSaved = mediaRoot?.appendingPathComponent("media-2.mp4")
+            let mediaMetadata = messagesRoot?.appendingPathComponent("message-\\(messageID).json")
+            let mediaText = messagesRoot?.appendingPathComponent("message-\\(messageID).txt")
+            let mediaOK = savedMedia
+                && (firstSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (secondSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (mediaMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (mediaText.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            add("History → Saved media copy", mediaOK, "album media + text + metadata copied to Media/Messages")
+            try? FileManager.default.removeItem(at: tempRoot)
 
-            let textMessage = AyuMessage(fakeID: 0, userID: accountID, dialogID: dialogID + 1, peerID: dialogID + 1, fromID: accountID, messageID: messageID + 1, date: Int32(Date().timeIntervalSince1970), text: "standalone saved text", isDeleted: true)
+            let textMessage = AyuMessage(
+                fakeID: 0,
+                userID: accountID,
+                dialogID: dialogID + 1,
+                peerID: dialogID + 1,
+                fromID: accountID,
+                messageID: messageID + 1,
+                date: Int32(Date().timeIntervalSince1970),
+                text: "standalone saved text",
+                isDeleted: true
+            )
             let savedText = AyuGramMediaArchive.saveToSaved(message: textMessage)
-            let textRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("AyuGram", isDirectory: true).appendingPathComponent("Saved", isDirectory: true).appendingPathComponent(String(accountID), isDirectory: true).appendingPathComponent(String(dialogID + 1), isDirectory: true).appendingPathComponent(String(messageID + 1), isDirectory: true)
-            let textFileExists: Bool
-            let textMetadataExists: Bool
-            if let textRoot {
-                textFileExists = FileManager.default.fileExists(atPath: textRoot.appendingPathComponent("message.txt").path)
-                textMetadataExists = FileManager.default.fileExists(atPath: textRoot.appendingPathComponent("metadata.json").path)
-            } else {
-                textFileExists = false
-                textMetadataExists = false
-            }
-            let textOK = savedText && textFileExists && textMetadataExists
-            add("History → Saved text copy", textOK, "text + metadata copied")
-            try? FileManager.default.removeItem(at: textRoot ?? FileManager.default.temporaryDirectory)
-
+            let textFile = messagesRoot?.appendingPathComponent("message-\\(messageID + 1).txt")
+            let textMetadata = messagesRoot?.appendingPathComponent("message-\\(messageID + 1).json")
+            let textOK = savedText
+                && (textFile.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (textMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            add("History → Saved text copy", textOK, "text + metadata copied to Messages")
+            
+            try? mediaRoot.map { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+            
             let now = Int64(Date().timeIntervalSince1970 * 1000.0)
             let report = AyuGramSmokeTestReport(version: AyuGramRuntime.version, accountID: 0, startedAt: now, finishedAt: now, items: items)
             let reportURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("AyuGram", isDirectory: true).appendingPathComponent("AyuGramSmokeReport.json")
@@ -110,7 +141,7 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
                 }
             }
         }
-"""
+
 if "AyuGram standalone smoke report written" not in s:
     if launch_anchor not in s:
         raise SystemExit("AppDelegate launch anchor not found")
