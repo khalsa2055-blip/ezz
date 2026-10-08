@@ -1118,6 +1118,41 @@ if more_text.count('text: "AyuGram History"') != 1:
 
 more_menu.write_text(more_text)
 
+# 6c) Main Telegram "More"/Settings tab: expose a global AyuGram History entry.
+# This is the screen the user reaches from Telegram's bottom-right More/Settings tab.
+# It opens the same History screen without requiring a group/profile menu first.
+settings_items = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift"
+if not settings_items.exists():
+    raise SystemExit(f"Missing account More/Settings items source: {settings_items}")
+settings_text = settings_items.read_text()
+if "import AyuGramSettingsScreen" not in settings_text:
+    settings_text = settings_text.replace(
+        "import AccountContext\n",
+        "import AccountContext\nimport AyuGramSettingsScreen\n",
+        1,
+    )
+
+global_history_action = '''    items[.extra]!.append(PeerInfoScreenDisclosureItem(
+        id: 900,
+        text: "AyuGram History",
+        icon: UIImage(bundleImageName: "Settings/Archives"),
+        action: {
+            let controller = ayuGramHistoryScreen(context: context)
+            interaction.pushController(controller)
+        }
+    ))
+
+'''
+settings_anchor = '''    if let settings = data.globalSettings {
+'''
+if 'id: 900,\n        text: "AyuGram History"' not in settings_text:
+    if settings_anchor not in settings_text:
+        raise SystemExit("Main More/Settings extra-section anchor not found")
+    settings_text = settings_text.replace(settings_anchor, global_history_action + settings_anchor, 1)
+if settings_text.count('text: "AyuGram History"') < 1:
+    raise SystemExit("Main More/Settings AyuGram History entry was not installed")
+settings_items.write_text(settings_text)
+
 # 7) History bubble UI: show real sender names and both timestamps.
 
 ui = root / "submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuGramSettingsScreen.swift"
