@@ -839,6 +839,9 @@ delete_paths = [
 automatic_media_old = "                if let image = media as? TelegramMediaImage {\n                    for representation in image.representations.sorted(by: {\n                        Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                            > Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                    }) {\n                        resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                    }\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
 automatic_media_new = "                if let image = media as? TelegramMediaImage,\n                   let representation = image.representations.max(by: {\n                       Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                           < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                   }) {\n                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
 
+# Exact indentation used by the edit-history hook.
+automatic_media_old_edited = "                        if let image = media as? TelegramMediaImage {\n                            for representation in image.representations.sorted(by: {\n                                Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                    > Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                            }) {\n                                resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                            }\n                        } else if let file = media as? TelegramMediaFile {\n                            resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                        }"
+automatic_media_new_edited = "                        if let image = media as? TelegramMediaImage,\n                           let representation = image.representations.max(by: {\n                               Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                   < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                           }) {\n                            resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                        } else if let file = media as? TelegramMediaFile {\n                            resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                        }"
 for delete_file in delete_paths:
     if not delete_file.exists():
         continue
@@ -885,7 +888,9 @@ for delete_file in delete_paths:
     elif delete_file.name == "AccountStateManagementUtils.swift":
         # Interactive/automatic deletion ultimately flows through DeleteMessages,
         # so no duplicate sender-name logic is needed here.
-        if automatic_media_old in d:
+        if automatic_media_old_edited in d:
+            d = d.replace(automatic_media_old_edited, automatic_media_new_edited, 1)
+        elif automatic_media_old in d:
             d = d.replace(automatic_media_old, automatic_media_new, 1)
         elif "AyuMediaResourceInfo" in d and "TelegramMediaImage" in d and "TelegramMediaFile" in d and "for representation in image.representations.sorted" in d:
             raise SystemExit(f"Automatic History photo capture anchor missing in {delete_file}")
