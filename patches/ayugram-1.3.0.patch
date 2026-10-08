@@ -493,7 +493,7 @@ new file mode 100644
 +        }
 +
 +        do {
-+            try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
++            try FileManager.default.createDirectory(at: supportURL, withIntermediateDirectories: true)
 +        } catch {
 +            return (nil, nil)
 +        }
@@ -512,7 +512,7 @@ new file mode 100644
 +
 +            let sourceExtension = URL(fileURLWithPath: sourcePath).pathExtension
 +            let extensionPart = !sourceExtension.isEmpty ? sourceExtension : (pathExtension ?? "bin")
-+            let destinationURL = baseURL.appendingPathComponent("\(index).\(extensionPart)")
++            let destinationURL = supportURL.appendingPathComponent("\(index).\(extensionPart)")
 +
 +            do {
 +                if !FileManager.default.fileExists(atPath: destinationURL.path) {
