@@ -141,7 +141,7 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
                 }
             }
         }
-
+"""
 if "AyuGram standalone smoke report written" not in s:
     if launch_anchor not in s:
         raise SystemExit("AppDelegate launch anchor not found")
