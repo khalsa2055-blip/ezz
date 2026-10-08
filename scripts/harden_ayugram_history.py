@@ -1044,13 +1044,24 @@ if "func addAyuGramHistoryAction" not in pm:
         raise SystemExit("PeerInfo menu peerId anchor not found")
     pm = pm.replace(anchor, helper, 1)
 
+# Insert into the actual profile/media More-menu by its unique controller assignment.
+# This is deliberately anchored to mediaGalleryContextMenu rather than relying on
+# the ordinal position of makeContextController() calls, which can change upstream.
+history_call = "                addAyuGramHistoryAction(&items)\n\n"
 if "addAyuGramHistoryAction(&items)" not in pm:
-    matches = list(re.finditer(r"(?m)^\s*let contextController = makeContextController\(", pm))
-    if not matches:
-        raise SystemExit("PeerInfo context controller anchor not found")
-    # Insert exactly once into the normal profile/media More-menu construction.
-    insert_pos = matches[-1].start()
-    pm = pm[:insert_pos] + "                addAyuGramHistoryAction(&items)\n\n" + pm[insert_pos:]
+    marker = "                strongSelf.mediaGalleryContextMenu = contextController"
+    if marker not in pm:
+        raise SystemExit("PeerInfo media More-menu controller anchor not found")
+    marker_pos = pm.find(marker)
+    controller_pos = pm.rfind(
+        "                let contextController = makeContextController(",
+        0,
+        marker_pos
+    )
+    if controller_pos < 0:
+        raise SystemExit("PeerInfo media More-menu context controller declaration not found")
+    pm = pm[:controller_pos] + history_call + pm[controller_pos:]
+
 if "addAyuGramHistoryAction(&items)" not in pm:
     raise SystemExit("PeerInfo three-dots History action insertion failed")
 peer_menu.write_text(pm)
