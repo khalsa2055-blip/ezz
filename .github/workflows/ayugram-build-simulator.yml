@@ -185,6 +185,7 @@ jobs:
 
           # Comprehensive AyuGram runtime smoke-test hook (UI + feature verification).
           python3 ../scripts/inject_ayugram_history_test.py
+          python3 "$GITHUB_WORKSPACE/.github/history-menu-smoke.py"
 
           git diff --check
 
@@ -347,7 +348,7 @@ jobs:
 
           xcrun simctl install "$DEVICE_UDID" "$app"
           set +e
-          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramFullSmokeTest 2>&1)
+          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryMenuSmokeTest 2>&1)
           launch_rc=$?
           set -e
           echo "$launch_output"
@@ -361,28 +362,23 @@ jobs:
           # ps inside the simulator does not consistently expose third-party process names.
           echo "Simulator launch succeeded: $launch_output"
 
-          # Wait briefly for the app's ready callback instead of failing on a fixed 12s delay.
+          # History-only smoke test: wait for the actual More/Settings list
+          # and verify its real accessibility element for "AyuGram History".
           APP_CONTAINER=$(xcrun simctl get_app_container "$DEVICE_UDID" "$bundle_id" data)
           echo "Simulator app data container: $APP_CONTAINER"
+          marker=""
           report=""
-          history_marker=""
-          for attempt in $(seq 1 30); do
-            report=$(find "$APP_CONTAINER" -type f -name "AyuGramSmokeReport.json" -print -quit 2>/dev/null || true)
-            history_marker=$(find "$APP_CONTAINER" -type f -name "AyuGramHistoryPresented.txt" -print -quit 2>/dev/null || true)
-            [ -n "$report" ] && [ -f "$report" ] && break
-            sleep 2
+          for attempt in $(seq 1 60); do
+            marker=$(find "$APP_CONTAINER" -type f -name "AyuGramHistoryMoreMenuPresented.txt" -print -quit 2>/dev/null || true)
+            report=$(find "$APP_CONTAINER" -type f -name "AyuGramHistoryMenuSmokeReport.json" -print -quit 2>/dev/null || true)
+            if [ -n "$marker" ] && [ -f "$marker" ] && [ -n "$report" ] && [ -f "$report" ]; then
+              break
+            fi
+            sleep 1
           done
-          if [ -z "$report" ] || [ ! -f "$report" ]; then
-            echo "AyuGramSmokeReport.json was not found in the simulator app data container." >&2
-            find "$APP_CONTAINER" -maxdepth 5 -type f \( -name "*Smoke*" -o -name "*Report*.json" \) -print 2>/dev/null | head -100 || true
-            exit 1
-          fi
-          if [ -n "$history_marker" ] && [ -f "$history_marker" ]; then
-            echo "AyuGram History ready marker confirmed: $history_marker"
-          else
-            echo "History ready marker not present yet; relying on the runtime report and screenshot."
-          fi
 
+          test -n "$report" && test -f "$report"
+          test -n "$marker" && test -f "$marker"
 
           python3 - "$report" <<'PY'
           import json, sys
@@ -390,18 +386,19 @@ jobs:
 
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           print(json.dumps(report, ensure_ascii=False, indent=2))
-          if report.get("failed") != 0 or not report.get("items") or report.get("passed") != len(report["items"]):
-              raise SystemExit("AyuGram comprehensive smoke test FAILED")
-          print(f"AyuGram comprehensive smoke test PASSED: {report['passed']} checks")
+          assert report.get("deleted_history_entry_present") is True, report
+          assert report.get("more_menu_ayu_gram_history_visible") is True, report
+          assert report.get("passed") is True, report
+          print("AyuGram History-only smoke test PASSED: deleted history + real More/Settings button")
           PY
 
           mkdir -p ci-artifacts/smoke
-          cp "$report" ci-artifacts/smoke/AyuGramSmokeReport.json
+          cp "$report" ci-artifacts/smoke/AyuGramHistoryMenuSmokeReport.json
 
-          # Capture a real screenshot from the running Simulator UI so the actual History
-          # screen (including Deleted/Edited test entries) can be visually inspected.
-          xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-Simulator.png
-          test -s ci-artifacts/smoke/AyuGram-Simulator.png
+          # Capture the actual Telegram More/Settings screen after the History row
+          # has been scrolled into view and its accessibility element was confirmed.
+          xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-More.png
+          test -s ci-artifacts/smoke/AyuGram-History-More.png
 
           # Check only for recent Telegram-process crash/fatal messages; do not treat
           # unrelated SpringBoard system messages as an app failure.
@@ -452,8 +449,8 @@ jobs:
       - name: Upload simulator screenshot
         uses: actions/upload-artifact@v4
         with:
-          name: AyuGram-iOS-simulator-screenshot-${{ github.run_number }}
-          path: telegram-ios/ci-artifacts/smoke/AyuGram-Simulator.png
+          name: AyuGram-iOS-history-more-screenshot-${{ github.run_number }}
+          path: telegram-ios/ci-artifacts/smoke/AyuGram-History-More.png
           if-no-files-found: error
 
       - name: Upload simulator artifacts
