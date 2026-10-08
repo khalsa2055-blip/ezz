@@ -239,6 +239,26 @@ jobs:
       - name: Harden AyuGram History persistence
         working-directory: telegram-ios
         run: python3 "$GITHUB_WORKSPACE/scripts/harden_ayugram_history.py"
+      - name: Verify group More menu History route
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenPerformButtonAction.swift").read_text(encoding="utf-8")
+          required = [
+              'text: "AyuGram History"',
+              "ayuGramHistoryScreen(",
+              "dialogID: self.peerId.toInt64()"
+          ]
+          missing = [marker for marker in required if marker not in source]
+          if missing:
+              raise SystemExit("Group More menu History route is missing: " + ", ".join(missing))
+          if source.count('text: "AyuGram History"') != 1:
+              raise SystemExit("Expected exactly one AyuGram History entry in group More menu")
+          print("Verified production group More menu History entry and per-group routing.")
+          PY
+
 
       - name: Create simulator build configuration
         working-directory: telegram-ios
@@ -362,32 +382,47 @@ jobs:
           # ps inside the simulator does not consistently expose third-party process names.
           echo "Simulator launch succeeded: $launch_output"
 
-          # History-only test: add a synthetic deleted message, open its actual
-          # filtered History screen, save a screenshot, then validate persistence.
+          # The Simulator has no authenticated Telegram session, so this
+          # launch-only harness renders the group More menu and a synthetic deleted
+          # History row. The production menu action is separately verified above.
           APP_CONTAINER=$(xcrun simctl get_app_container "$DEVICE_UDID" "$bundle_id" data)
+          DOCUMENTS="$APP_CONTAINER/Documents"
           echo "Simulator app data container: $APP_CONTAINER"
+          mkdir -p ci-artifacts/smoke
+          menu_marker=""
+          history_marker=""
           report=""
-          for attempt in $(seq 1 45); do
-            report=$(find "$APP_CONTAINER" -type f -name "AyuGramHistoryListSmokeReport.json" -print -quit 2>/dev/null || true)
-            if [ -n "$report" ] && [ -f "$report" ]; then
+          for attempt in $(seq 1 75); do
+            menu_marker=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryMenuHarnessReady.txt" -print -quit 2>/dev/null || true)
+            if [ -n "$menu_marker" ] && [ -f "$menu_marker" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$menu_marker" ] || [ ! -f "$menu_marker" ]; then
+            xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Test-Failed.png
+            echo "History menu harness did not become visible. Captured current Simulator screen." >&2
+            exit 1
+          fi
+
+          xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Menu.png
+          test -s ci-artifacts/smoke/AyuGram-History-Menu.png
+
+          for attempt in $(seq 1 30); do
+            history_marker=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListHarnessReady.txt" -print -quit 2>/dev/null || true)
+            report=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListSmokeReport.json" -print -quit 2>/dev/null || true)
+            if [ -n "$history_marker" ] && [ -f "$history_marker" ] && [ -n "$report" ] && [ -f "$report" ]; then
               break
             fi
             sleep 1
           done
 
-          mkdir -p ci-artifacts/smoke
-          # Capture even if the report is missing or the feature check fails,
-          # so the artifact can show what the Simulator actually displayed.
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-List.png
           test -s ci-artifacts/smoke/AyuGram-History-List.png
-
           if [ -z "$report" ] || [ ! -f "$report" ]; then
-            echo "History-only report was not created. Recent app logs:" >&2
-            xcrun simctl spawn "$DEVICE_UDID" log show --last 3m --style compact --predicate 'process == "Telegram"' | tail -200 || true
-            find "$APP_CONTAINER" -maxdepth 5 -type f -name "*History*Smoke*" -print 2>/dev/null | head -100 || true
+            echo "History harness report was not created." >&2
             exit 1
           fi
-
           cp "$report" ci-artifacts/smoke/AyuGramHistoryListSmokeReport.json
           python3 - "$report" <<'PY'
           import json, sys
@@ -395,10 +430,11 @@ jobs:
 
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           print(json.dumps(report, ensure_ascii=False, indent=2))
-          assert report.get("deleted_history_entry_present") is True, report
-          assert report.get("history_screen_presentation_requested") is True, report
+          assert report.get("menu_screen_rendered") is True, report
+          assert report.get("history_screen_rendered") is True, report
+          assert report.get("deleted_message_entry_rendered") is True, report
           assert report.get("passed") is True, report
-          print("AyuGram History-only smoke test PASSED: deleted record + History screen opened")
+          print("History UI harness passed: More menu and deleted-entry screen rendered.")
           PY
 
           # Check only for recent Telegram-process crash/fatal messages; do not treat
@@ -451,8 +487,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AyuGram-iOS-history-list-screenshot-${{ github.run_number }}
-          path: telegram-ios/ci-artifacts/smoke/AyuGram-History-List.png
+          name: AyuGram-iOS-history-ui-screenshots-${{ github.run_number }}
+          path: telegram-ios/ci-artifacts/smoke/AyuGram-History-*.png
           if-no-files-found: error
 
       - name: Upload simulator artifacts
