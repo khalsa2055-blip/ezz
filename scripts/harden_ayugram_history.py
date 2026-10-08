@@ -1103,7 +1103,7 @@ history_action = '''                items.append(.action(ContextMenuActionItem(
                 )))
 '''
 
-if "text: "AyuGram History"" not in more_text:
+if 'text: "AyuGram History"' not in more_text:
     anchor = '''                var items: [ContextMenuItem] = []
                 guard let strongSelf = self else {
                     return .single(items)
