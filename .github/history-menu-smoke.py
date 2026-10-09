@@ -8,7 +8,11 @@ if "private final class AyuGramHistoryHarnessController" not in s:
     if anchor not in s:
         raise SystemExit("AppDelegate harness insertion anchor not found")
 
-    harness = r'''private final class AyuGramHistoryHarnessController: ViewController {
+    harness = r'''private enum AyuGramHistoryHarnessWindowHolder {
+    static var window: UIWindow?
+}
+
+private final class AyuGramHistoryHarnessController: UIViewController {
     private let reportURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         .appendingPathComponent("AyuGramHistoryListSmokeReport.json")
     private let menuMarkerURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -20,12 +24,11 @@ if "private final class AyuGramHistoryHarnessController" not in s:
     private var showingHistory = false
     private var transitionScheduled = false
 
-    override init(navigationBarPresentationData: NavigationBarPresentationData? = nil) {
-        super.init(navigationBarPresentationData: navigationBarPresentationData)
-        self.displayNavigationBar = false
+    override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
+        super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
     }
 
-    required init(coder: NSCoder) {
+    required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -226,7 +229,16 @@ if "AyuGramHistoryHarnessController(), on: .root" not in s:
                 guard let self else {
                     return
                 }
-                self.mainWindow.present(AyuGramHistoryHarnessController(), on: .root)
+                if let scene = self.nativeWindow?.windowScene {
+                    let overlay = UIWindow(windowScene: scene)
+                    overlay.windowLevel = UIWindow.Level.alert + 1
+                    overlay.backgroundColor = UIColor.systemGroupedBackground
+                    overlay.rootViewController = AyuGramHistoryHarnessController(nibName: nil, bundle: nil)
+                    AyuGramHistoryHarnessWindowHolder.window = overlay
+                    overlay.makeKeyAndVisible()
+                } else {
+                    self.mainWindow.present(AyuGramHistoryHarnessController(nibName: nil, bundle: nil), on: .root)
+                }
             }
         }
 
