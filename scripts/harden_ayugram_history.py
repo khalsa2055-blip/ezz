@@ -787,6 +787,25 @@ private enum AyuHistoryEntry: ItemListNodeEntry {
     }
 }
 
+# Install the bubble UI template into the actual Telegram screen source.
+# Defining history_preview_helper alone is not enough; it must replace the old text-only History entry model.
+if "AyuHistoryBubbleItemNode" not in ui_text:
+    history_enum_marker = "private enum AyuHistoryEntry: ItemListNodeEntry {"
+    enum_start = ui_text.find(history_enum_marker)
+    arguments_marker = "private final class AyuSettingsArguments {"
+    arguments_start = ui_text.find(arguments_marker, enum_start)
+    template_enum_start = history_preview_helper.find(history_enum_marker)
+    if enum_start < 0 or arguments_start < 0 or template_enum_start < 0:
+        raise SystemExit("Could not locate text-only History entry model to replace with chat-bubble UI")
+    # Keep the custom bubble item/node classes and their rich message entry enum.
+    ui_text = (
+        ui_text[:enum_start]
+        + history_preview_helper
+        + "\n\n"
+        + ui_text[arguments_start:]
+    )
+    ui.write_text(ui_text)
+
 if "AyuHistoryBubbleItem" not in ui_text or "savePressed" not in ui_text or "mediaPressed" not in ui_text:
     raise SystemExit("Saved Messages-style History bubble UI missing")
 
@@ -1295,11 +1314,12 @@ u = u.replace("formatter.dateStyle = .medium", "formatter.dateStyle = .short", 1
 item_match = re.search(r'(?m)^(\s*)entries\.append\(\.item\(message\.fakeID, (.+)\)\)', u)
 if item_match:
     indent = item_match.group(1)
-    replacement = (
-        indent + 'let sender = message.fromName ?? ""\n'
-        + indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
-        + indent + 'entries.append(.item(message.fakeID, "\\(sender.isEmpty ? \"Unknown sender\" : sender) • \\(kind) • \\(meta)\\(mediaLabel)\\n\\(body)"))'
-    )
+    sender = indent + 'let sender = message.fromName ?? ""\n'
+    meta = indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
+    if "case message(Int64, AyuMessage" in u:
+        replacement = sender + meta + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
+    else:
+        replacement = sender + meta + indent + 'entries.append(.item(message.fakeID, "\\(sender.isEmpty ? \"Unknown sender\" : sender) • \\(kind) • \\(meta)\\(mediaLabel)\\n\\(body)"))'
     u = u[:item_match.start()] + replacement + u[item_match.end():]
 else:
     # Support a future richer .message model if the source is deliberately upgraded.
