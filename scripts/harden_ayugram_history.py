@@ -787,73 +787,22 @@ private enum AyuHistoryEntry: ItemListNodeEntry {
     }
 }
 
-# Install the bubble UI template into the actual Telegram screen source.
-# Defining history_preview_helper alone is not enough; it must replace the old text-only History entry model.
-if "AyuHistoryBubbleItemNode" not in ui_text:
-    history_enum_marker = "private enum AyuHistoryEntry: ItemListNodeEntry {"
-    enum_start = ui_text.find(history_enum_marker)
-    arguments_marker = "private final class AyuSettingsArguments {"
-    arguments_start = ui_text.find(arguments_marker, enum_start)
-    template_enum_start = history_preview_helper.find(history_enum_marker)
-    if enum_start < 0 or arguments_start < 0 or template_enum_start < 0:
-        raise SystemExit("Could not locate text-only History entry model to replace with chat-bubble UI")
-    # Keep the custom bubble item/node classes and their rich message entry enum.
-    ui_text = (
-        ui_text[:enum_start]
-        + history_preview_helper
-        + "\n\n"
-        + ui_text[arguments_start:]
-    )
-    ui.write_text(ui_text)
-
-# Enforce the style on the actual file contents even if a prior helper already inserted a bubble node.
-# The source may contain an older version of the node, so checking only the template is insufficient.
-if "AyuHistoryBubbleItemNode" not in ui_text:
-    history_enum_marker = "private enum AyuHistoryEntry: ItemListNodeEntry {"
-    enum_start = ui_text.find(history_enum_marker)
-    arguments_marker = "private final class AyuSettingsArguments {"
-    arguments_start = ui_text.find(arguments_marker, enum_start)
-    if enum_start < 0 or arguments_start < 0:
-        raise SystemExit("Could not locate History entries to install chat-bubble UI")
-    ui_text = ui_text[:enum_start] + history_preview_helper + "\n\n" + ui_text[arguments_start:]
-
-ui_text, bubble_count = re.subn(
-    r'let bubbleWidth = [^\n]+',
-    'let bubbleWidth = min(max(params.width * 0.80, 220.0), min(params.width - 24.0, 340.0))',
-    ui_text,
-    count=1,
-)
-if bubble_count != 1:
-    raise SystemExit("Could not apply Telegram-style bubble width to the actual History UI source")
-ui_text = ui_text.replace("self.timeLabel.textAlignment = .right", "self.timeLabel.textAlignment = .left", 1)
-sender_color = """self.senderLabel.textColor = UIColor { trait in
-                    if trait.userInterfaceStyle == .dark {
-                        return UIColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1.0)
-                    }
-                    return UIColor(red: 0.10, green: 0.42, blue: 0.73, alpha: 1.0)
-                }"""
-ui_text = re.sub(
-    r'self\.senderLabel\.textColor = UIColor\.label',
-    lambda _: sender_color,
-    ui_text,
-    count=1,
-)
-ui_text = re.sub(
-    r'self\.senderLabel\.text = [^\n]+',
-    'self.senderLabel.text = item.senderName.isEmpty ? "Unknown sender" : item.senderName',
-    ui_text,
-    count=1,
-)
-ui_text = re.sub(
-    r'self\.timeLabel\.frame = CGRect\([^\n]+\)',
-    'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)',
-    ui_text,
-    count=1,
-)
+# Replace the entire History item model with the Telegram-style message-bubble UI.
+# Do this unconditionally: a stale class/comment name must not skip installing the layout.
+history_enum_marker = "private enum AyuHistoryEntry: ItemListNodeEntry {"
+enum_start = ui_text.find(history_enum_marker)
+arguments_marker = "private final class AyuSettingsArguments {"
+arguments_start = ui_text.find(arguments_marker, enum_start)
+if enum_start < 0 or arguments_start < 0:
+    raise SystemExit("Could not locate History entries and AyuSettingsArguments anchors")
+template_enum_start = history_preview_helper.find(history_enum_marker)
+if template_enum_start < 0 or "AyuHistoryBubbleItemNode" not in history_preview_helper:
+    raise SystemExit("Telegram-style History bubble template is incomplete")
+ui_text = ui_text[:enum_start] + history_preview_helper + "\n\n" + ui_text[arguments_start:]
 ui.write_text(ui_text)
 
-if "AyuHistoryBubbleItem" not in ui_text or "savePressed" not in ui_text or "mediaPressed" not in ui_text:
-    raise SystemExit("Saved Messages-style History bubble UI missing")
+if "AyuHistoryBubbleItemNode" not in ui_text or "savePressed" not in ui_text or "mediaPressed" not in ui_text:
+    raise SystemExit("Telegram-style History bubble UI was not installed")
 
 # Validate the user-visible Save action and its real storage contract.
 archive_text = archive.read_text()
