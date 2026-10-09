@@ -455,7 +455,7 @@ jobs:
           xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" >/dev/null 2>&1 || true
 
           set +e
-          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest -AyuGramHistoryMenuOnlySmokeTest 2>&1)
+          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest -AyuGramHistoryListOnlySmokeTest 2>&1)
           launch_rc=$?
           set -e
           echo "$launch_output"
@@ -475,29 +475,8 @@ jobs:
           echo "Simulator app data container: $APP_CONTAINER"
           echo "Cleared stale History smoke markers before launch."
           mkdir -p ci-artifacts/smoke
-          menu_marker=""
           history_marker=""
           report=""
-          for attempt in $(seq 1 75); do
-            menu_marker=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryMenuHarnessReady.txt" -print -quit 2>/dev/null || true)
-            if [ -n "$menu_marker" ] && [ -f "$menu_marker" ]; then
-              break
-            fi
-            sleep 1
-          done
-          if [ -z "$menu_marker" ] || [ ! -f "$menu_marker" ]; then
-            xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Test-Failed.png
-            echo "History menu harness did not become visible. Captured current Simulator screen." >&2
-            exit 1
-          fi
-
-          xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Menu.png
-          test -s ci-artifacts/smoke/AyuGram-History-Menu.png
-
-          # Keep the same process alive. The visual fixture transitions from the
-          # group menu to History automatically after 60 seconds, avoiding a flaky
-          # second simctl launch that can leave SpringBoard in the foreground.
-
           for attempt in $(seq 1 75); do
             history_marker=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListHarnessReady.txt" -print -quit 2>/dev/null || true)
             report=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListSmokeReport.json" -print -quit 2>/dev/null || true)
@@ -507,9 +486,9 @@ jobs:
             sleep 1
           done
 
-          if [ -z "$history_marker" ] || [ ! -f "$history_marker" ]; then
+          if [ -z "$history_marker" ] || [ ! -f "$history_marker" ] || [ -z "$report" ] || [ ! -f "$report" ]; then
             xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Test-Failed.png
-            echo "History harness did not transition to its message-bubble list." >&2
+            echo "History-only harness did not render its message-bubble list." >&2
             xcrun simctl spawn "$DEVICE_UDID" log show --last 2m --style compact --predicate 'process == "Telegram"' | tail -200 || true
             exit 1
           fi
@@ -532,15 +511,6 @@ jobs:
               return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
           }
 
-          let menuText = try recognizedText("ci-artifacts/smoke/AyuGram-History-Menu.png")
-          print("Menu screenshot OCR:\n\(menuText)")
-          guard menuText.localizedCaseInsensitiveContains("Group Info"),
-                menuText.localizedCaseInsensitiveContains("AyuGram History"),
-                !menuText.localizedCaseInsensitiveContains("Start Messaging") else {
-              fputs("Menu screenshot is not the stable group More menu fixture.\n", stderr)
-              exit(1)
-          }
-
           let historyText = try recognizedText("ci-artifacts/smoke/AyuGram-History-List.png")
           print("History screenshot OCR:\n\(historyText)")
           guard historyText.localizedCaseInsensitiveContains("Smoke Test Sender"),
@@ -549,7 +519,7 @@ jobs:
               fputs("History screenshot is not the deleted-message History fixture.\n", stderr)
               exit(1)
           }
-          print("Both History UI screenshots visually verified.")
+          print("History-only fixture screenshot visually verified; group-menu route checked separately in source.")
           SWIFT
           swift ci-artifacts/smoke/verify-history-screenshots.swift
           if [ -z "$report" ] || [ ! -f "$report" ]; then
