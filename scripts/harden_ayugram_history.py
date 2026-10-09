@@ -1393,6 +1393,33 @@ u = u.replace(
 )
 if "Messages deleted or edited after this version is installed will appear here." not in u:
     raise SystemExit("History empty-state migration did not apply")
+# Final, last-writer pass: ensure the actual source written to disk has chat-style bubbles.
+# This runs after the sender/time metadata transforms, so they cannot restore the old width.
+bubble_width_line = 'let bubbleWidth = min(max(params.width * 0.80, 220.0), min(params.width - 24.0, 340.0))'
+u, bubble_width_count = re.subn(
+    r'let bubbleWidth = [^\n]+',
+    bubble_width_line,
+    u,
+    count=1,
+)
+if bubble_width_count != 1:
+    raise SystemExit("Final History UI has no bubble-width line to style")
+u = u.replace("self.timeLabel.textAlignment = .right", "self.timeLabel.textAlignment = .left", 1)
+u = re.sub(
+    r'self\.senderLabel\.text = [^\n]+',
+    'self.senderLabel.text = item.senderName.isEmpty ? "Unknown sender" : item.senderName',
+    u,
+    count=1,
+)
+u = re.sub(
+    r'self\.timeLabel\.frame = CGRect\([^\n]+\)',
+    'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)',
+    u,
+    count=1,
+)
+if bubble_width_line not in u:
+    raise SystemExit("Final Telegram-style History bubble width was not retained")
+
 ui.write_text(u)
 
 # 8) Saved metadata also records sender and deletion time.
