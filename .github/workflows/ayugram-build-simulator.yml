@@ -494,16 +494,9 @@ jobs:
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Menu.png
           test -s ci-artifacts/smoke/AyuGram-History-Menu.png
 
-          # The menu stays on screen; launch a second fresh process in History mode
-          # after the menu screenshot is saved to avoid timer-induced screen races.
-          xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" >/dev/null 2>&1 || true
-          rm -f "$DOCUMENTS/AyuGramHistoryListHarnessReady.txt" "$DOCUMENTS/AyuGramHistoryListSmokeReport.json"
-          set +e
-          history_launch=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest -AyuGramHistoryListOnlySmokeTest 2>&1)
-          history_launch_rc=$?
-          set -e
-          echo "$history_launch"
-          test "$history_launch_rc" -eq 0 || { echo "History-only simulator relaunch failed." >&2; exit "$history_launch_rc"; }
+          # Keep the same process alive. The visual fixture transitions from the
+          # group menu to History automatically after 60 seconds, avoiding a flaky
+          # second simctl launch that can leave SpringBoard in the foreground.
 
           for attempt in $(seq 1 75); do
             history_marker=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListHarnessReady.txt" -print -quit 2>/dev/null || true)
