@@ -65,7 +65,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
             // in front of the app on slower simulator boots.
             if ProcessInfo.processInfo.arguments.contains("-AyuGramHistoryMenuOnlySmokeTest") && !self.historyAutoAdvanceScheduled {
                 self.historyAutoAdvanceScheduled = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 60.0) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
                     self?.showHistory()
                 }
             }
