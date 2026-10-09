@@ -95,8 +95,8 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
                 isDeleted: true
             )
             let savedMedia = AyuGramMediaArchive.saveToSaved(message: message)
-            let firstSaved = mediaRoot?.appendingPathComponent("media-1.jpg")
-            let secondSaved = mediaRoot?.appendingPathComponent("media-2.mp4")
+            let firstSaved = mediaRoot?.appendingPathComponent("message-\\(messageID)-media-1.jpg")
+            let secondSaved = mediaRoot?.appendingPathComponent("message-\\(messageID)-media-2.mp4")
             let mediaMetadata = messagesRoot?.appendingPathComponent("message-\\(messageID).json")
             let mediaText = messagesRoot?.appendingPathComponent("message-\\(messageID).txt")
             let mediaOK = savedMedia
