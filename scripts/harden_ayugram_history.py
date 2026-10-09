@@ -52,6 +52,58 @@ for p in (archive, message, store, capture):
     if not p.exists():
         raise SystemExit(f"Missing AyuGram history source: {p}")
 
+# Migrate settings created by older installed builds.
+# Synthesized Codable decoding fails when newer AyuSettings properties are missing;
+# captureDeleted uses try? for this store, which would silently disable automatic History.
+settings_store = root / "submodules/AyuGramIOS/Sources/AyuSettingsStore.swift"
+if not settings_store.exists():
+    raise SystemExit(f"Missing AyuGram settings store: {settings_store}")
+settings_store_text = settings_store.read_text()
+old_settings_load = ```        if FileManager.default.fileExists(atPath: url.path) {
+            let data = try Data(contentsOf: url)
+            self.cached = try decoder.decode(AyuSettings.self, from: data)
+        } else {
+            self.cached = initial
+            try persist(initial)
+        }
+```
+new_settings_load = ```        if FileManager.default.fileExists(atPath: url.path) {
+            let data = try Data(contentsOf: url)
+            if let decoded = try? decoder.decode(AyuSettings.self, from: data) {
+                self.cached = decoded
+            } else {
+                // Older versions may not contain every field introduced later.
+                // Start from today's defaults and merge each compatible old value.
+                var migrated = initial
+                if let defaultsData = try? encoder.encode(initial),
+                   var merged = (try? JSONSerialization.jsonObject(with: defaultsData)) as? [String: Any],
+                   let existing = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                    for (key, value) in existing {
+                        var candidate = merged
+                        candidate[key] = value
+                        guard JSONSerialization.isValidJSONObject(candidate),
+                              let candidateData = try? JSONSerialization.data(withJSONObject: candidate),
+                              let decoded = try? decoder.decode(AyuSettings.self, from: candidateData) else {
+                            continue
+                        }
+                        merged = candidate
+                        migrated = decoded
+                    }
+                }
+                self.cached = migrated
+                try persist(migrated)
+            }
+        } else {
+            self.cached = initial
+            try persist(initial)
+        }
+```
+if old_settings_load in settings_store_text:
+    settings_store_text = settings_store_text.replace(old_settings_load, new_settings_load, 1)
+elif "Older versions may not contain every field introduced later." not in settings_store_text:
+    raise SystemExit("Settings migration anchor not found; refusing to skip the fix")
+settings_store.write_text(settings_store_text)
+
 # Automatic History media stays in Application Support (private app data).
 # The visible Documents tree is reserved for explicit manual Save.
 # Support common audio/document/video extensions instead of collapsing them to .bin.
@@ -139,6 +191,12 @@ if old_init not in s:
 # No semantic change here; this assertion intentionally ensures the current
 # constructor shape remains compatible with the capture code.
 store.write_text(s)
+
+# Fail the build if the settings migration that enables capture was bypassed.
+if "Older versions may not contain every field introduced later." not in settings_store.read_text():
+    raise SystemExit("Legacy settings migration missing: automatic History could silently disable")
+if "try persist(migrated)" not in settings_store.read_text():
+    raise SystemExit("Legacy settings migration does not persist migrated settings")
 
 # Fail the build if the hardening was accidentally bypassed.
 checks = {
@@ -1257,6 +1315,18 @@ else:
     elif ".message(message.fakeID, message, body, meta, kind, sender)" not in u and ".item(message.fakeID" not in u:
         raise SystemExit("History entry construction not recognized")
 
+# The screen title already identifies History; don't repeat the same section header
+# or leave a vague empty message that looks like a broken blank page.
+u = u.replace(
+    'return [.header("AyuGram History"), .empty("No deleted or edited messages yet.")]',
+    'return [.empty("Messages deleted or edited after this version is installed will appear here.")]',
+)
+u = u.replace(
+    'var entries: [AyuHistoryEntry] = [.header("AyuGram History")]',
+    'var entries: [AyuHistoryEntry] = []',
+)
+if "Messages deleted or edited after this version is installed will appear here." not in u:
+    raise SystemExit("History empty-state migration did not apply")
 ui.write_text(u)
 
 # 8) Saved metadata also records sender and deletion time.
