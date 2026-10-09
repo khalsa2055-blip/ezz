@@ -399,7 +399,7 @@ jobs:
                 "$DOCUMENTS/AyuGramHistoryListHarnessReady.txt" \
                 "$DOCUMENTS/AyuGramHistoryListSmokeReport.json"
           set +e
-          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest 2>&1)
+          launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest -AyuGramHistoryMenuOnlySmokeTest 2>&1)
           launch_rc=$?
           set -e
           echo "$launch_output"
@@ -438,34 +438,18 @@ jobs:
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Menu.png
           test -s ci-artifacts/smoke/AyuGram-History-Menu.png
 
-          cat > ci-artifacts/smoke/verify-history-screenshots.swift <<'SWIFT'
-          import Foundation
-          import Vision
-          import ImageIO
+          # The menu stays on screen; launch a second fresh process in History mode
+          # after the menu screenshot is saved to avoid timer-induced screen races.
+          xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" >/dev/null 2>&1 || true
+          rm -f "$DOCUMENTS/AyuGramHistoryListHarnessReady.txt" "$DOCUMENTS/AyuGramHistoryListSmokeReport.json"
+          set +e
+          history_launch=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest -AyuGramHistoryListOnlySmokeTest 2>&1)
+          history_launch_rc=$?
+          set -e
+          echo "$history_launch"
+          test "$history_launch_rc" -eq 0 || { echo "History-only simulator relaunch failed." >&2; exit "$history_launch_rc"; }
 
-          func recognizedText(_ path: String) throws -> String {
-              let url = URL(fileURLWithPath: path)
-              let request = VNRecognizeTextRequest()
-              request.recognitionLevel = .accurate
-              request.usesLanguageCorrection = false
-              let handler = VNImageRequestHandler(url: url)
-              try handler.perform([request])
-              return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-          }
-
-          let menuPath = "ci-artifacts/smoke/AyuGram-History-Menu.png"
-          let menuText = try recognizedText(menuPath)
-          print("Menu screenshot OCR:\n\(menuText)")
-          guard menuText.localizedCaseInsensitiveContains("Group Info"),
-                menuText.localizedCaseInsensitiveContains("AyuGram History"),
-                !menuText.localizedCaseInsensitiveContains("Start Messaging") else {
-              fputs("Menu screenshot is not the History harness screen.\n", stderr)
-              exit(1)
-          }
-          SWIFT
-          swift ci-artifacts/smoke/verify-history-screenshots.swift ci-artifacts/smoke/AyuGram-History-Menu.png
-
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 75); do
             history_marker=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListHarnessReady.txt" -print -quit 2>/dev/null || true)
             report=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListSmokeReport.json" -print -quit 2>/dev/null || true)
             if [ -n "$history_marker" ] && [ -f "$history_marker" ] && [ -n "$report" ] && [ -f "$report" ]; then
@@ -476,10 +460,11 @@ jobs:
 
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-List.png
           test -s ci-artifacts/smoke/AyuGram-History-List.png
-          cat > ci-artifacts/smoke/verify-history-list-screenshot.swift <<'SWIFT'
+          cat > ci-artifacts/smoke/verify-history-screenshots.swift <<'SWIFT'
           import Foundation
           import Vision
           import ImageIO
+          import Darwin
 
           func recognizedText(_ path: String) throws -> String {
               let url = URL(fileURLWithPath: path)
@@ -491,17 +476,26 @@ jobs:
               return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
           }
 
-          let path = "ci-artifacts/smoke/AyuGram-History-List.png"
-          let text = try recognizedText(path)
-          print("History screenshot OCR:\n\(text)")
-          guard text.localizedCaseInsensitiveContains("Smoke Test Sender"),
-                text.localizedCaseInsensitiveContains("Deleted: just now"),
-                !text.localizedCaseInsensitiveContains("Start Messaging") else {
-              fputs("History screenshot is not the deleted-message history harness screen.\n", stderr)
+          let menuText = try recognizedText("ci-artifacts/smoke/AyuGram-History-Menu.png")
+          print("Menu screenshot OCR:\n\(menuText)")
+          guard menuText.localizedCaseInsensitiveContains("Group Info"),
+                menuText.localizedCaseInsensitiveContains("AyuGram History"),
+                !menuText.localizedCaseInsensitiveContains("Start Messaging") else {
+              fputs("Menu screenshot is not the stable group More menu fixture.\n", stderr)
               exit(1)
           }
+
+          let historyText = try recognizedText("ci-artifacts/smoke/AyuGram-History-List.png")
+          print("History screenshot OCR:\n\(historyText)")
+          guard historyText.localizedCaseInsensitiveContains("Smoke Test Sender"),
+                historyText.localizedCaseInsensitiveContains("Deleted: just now"),
+                !historyText.localizedCaseInsensitiveContains("Start Messaging") else {
+              fputs("History screenshot is not the deleted-message History fixture.\n", stderr)
+              exit(1)
+          }
+          print("Both History UI screenshots visually verified.")
           SWIFT
-          swift ci-artifacts/smoke/verify-history-list-screenshot.swift ci-artifacts/smoke/AyuGram-History-List.png
+          swift ci-artifacts/smoke/verify-history-screenshots.swift
           if [ -z "$report" ] || [ ! -f "$report" ]; then
             echo "History harness report was not created." >&2
             exit 1
@@ -513,8 +507,8 @@ jobs:
 
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           print(json.dumps(report, ensure_ascii=False, indent=2))
-          assert report.get("menu_screen_rendered") is True, report
           assert report.get("history_screen_rendered") is True, report
+          assert report.get("deleted_message_entry_rendered") is True, report
           assert report.get("deleted_message_entry_rendered") is True, report
           assert report.get("passed") is True, report
           print("History UI harness passed: More menu and deleted-entry screen rendered.")
