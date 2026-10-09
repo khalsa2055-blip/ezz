@@ -261,9 +261,9 @@ for required in [
 
 
 # Keep History out of AyuGram Preferences; only the group/profile More menu opens it.
-old_settings_history_entries = ```        .history,
+old_settings_history_entries = """        .history,
         .clearDeletedHistory,
-```
+"""
 if old_settings_history_entries in ui_text:
     ui_text = ui_text.replace(old_settings_history_entries, "", 1)
 elif ".clearDeletedHistory," in ui_text.split("private func ayuSettingsEntries", 1)[1].split("public func ayuGramSettingsScreen", 1)[0]:
