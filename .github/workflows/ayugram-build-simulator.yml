@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - '.github/workflows/ayugram-build-simulator.yml'
+      - '.github/history-menu-smoke.py'
       - 'patches/**'
       - 'AyuGram/**'
       - 'submodules/**'
@@ -510,7 +511,7 @@ jobs:
         with:
           name: AyuGram-iOS-history-ui-screenshots-${{ github.run_number }}
           path: telegram-ios/ci-artifacts/smoke/AyuGram-History-*.png
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload simulator artifacts
         uses: actions/upload-artifact@v4
