@@ -22,6 +22,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
 
     private var contentStack = UIStackView()
     private var showingHistory = false
+    private var historyAutoAdvanceScheduled = false
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
@@ -60,6 +61,14 @@ private final class AyuGramHistoryHarnessController: UIViewController {
         } else {
             self.writeMarker(self.menuMarkerURL, text: "Group More menu harness is visible")
             self.writeReport(menuVisible: true, historyVisible: false)
+            // Keep this test in one process: a second simctl launch can leave SpringBoard
+            // in front of the app on slower simulator boots.
+            if ProcessInfo.processInfo.arguments.contains("-AyuGramHistoryMenuOnlySmokeTest") && !self.historyAutoAdvanceScheduled {
+                self.historyAutoAdvanceScheduled = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 60.0) { [weak self] in
+                    self?.showHistory()
+                }
+            }
         }
     }
 
