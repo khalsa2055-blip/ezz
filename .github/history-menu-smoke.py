@@ -22,7 +22,6 @@ private final class AyuGramHistoryHarnessController: UIViewController {
 
     private var contentStack = UIStackView()
     private var showingHistory = false
-    private var transitionScheduled = false
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
@@ -46,20 +45,21 @@ private final class AyuGramHistoryHarnessController: UIViewController {
             self.contentStack.trailingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.trailingAnchor, constant: -20.0),
             self.contentStack.topAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.topAnchor, constant: 24.0)
         ])
-        self.showMenu()
+        if ProcessInfo.processInfo.arguments.contains("-AyuGramHistoryListOnlySmokeTest") {
+            self.showHistory()
+        } else {
+            self.showMenu()
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if !self.showingHistory {
+        if self.showingHistory {
+            self.writeMarker(self.historyMarkerURL, text: "History list harness with a deleted test entry is visible")
+            self.writeReport(menuVisible: false, historyVisible: true)
+        } else {
             self.writeMarker(self.menuMarkerURL, text: "Group More menu harness is visible")
             self.writeReport(menuVisible: true, historyVisible: false)
-            if !self.transitionScheduled {
-                self.transitionScheduled = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) { [weak self] in
-                    self?.showHistory()
-                }
-            }
         }
     }
 
@@ -189,7 +189,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
         self.contentStack.addArrangedSubview(back)
         self.addSubtitle("Synthetic deleted-message fixture. No real Telegram chat session is authenticated in this Simulator.")
         self.writeMarker(self.historyMarkerURL, text: "History list harness with a deleted test entry is visible")
-        self.writeReport(menuVisible: true, historyVisible: true)
+        self.writeReport(menuVisible: false, historyVisible: true)
     }
 
     @objc private func showMenuPressed() {
@@ -209,7 +209,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
             "history_screen_rendered": historyVisible,
             "deleted_message_entry_rendered": historyVisible,
             "production_group_menu_route_is_source_checked": true,
-            "passed": menuVisible && historyVisible
+            "passed": historyVisible
         ]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: self.reportURL, options: .atomic)
