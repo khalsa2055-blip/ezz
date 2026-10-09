@@ -1224,6 +1224,20 @@ ui = root / "submodules/TelegramUI/Components/AyuGramSettingsScreen/Sources/AyuG
 if not ui.exists():
     raise SystemExit(f"Missing AyuGram History UI source: {ui}")
 u = ui.read_text()
+# A previous run may have left the original text-only UI on disk even though the
+# template exists in this script. Rebuild the actual screen source if so.
+if "let bubbleWidth = " not in u or "AyuHistoryBubbleItemNode" not in u:
+    history_enum_marker = "private enum AyuHistoryEntry: ItemListNodeEntry {"
+    enum_start = u.find(history_enum_marker)
+    arguments_marker = "private final class AyuSettingsArguments {"
+    arguments_start = u.find(arguments_marker, enum_start)
+    if enum_start < 0 or arguments_start < 0:
+        raise SystemExit("Could not find actual History source range for chat UI insertion")
+    if "let bubbleWidth = " not in history_preview_helper or "AyuHistoryBubbleItemNode" not in history_preview_helper:
+        raise SystemExit("The Telegram chat bubble template is missing its layout node")
+    u = u[:enum_start] + history_preview_helper + "\n\n" + u[arguments_start:]
+    ui.write_text(u)
+
 if "let senderName: String" not in u:
     u = u.replace(
         "    let displayKind: String\n\n    init(presentationData:",
