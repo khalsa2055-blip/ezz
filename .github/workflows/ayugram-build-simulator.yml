@@ -398,6 +398,48 @@ jobs:
           rm -f "$DOCUMENTS/AyuGramHistoryMenuHarnessReady.txt" \
                 "$DOCUMENTS/AyuGramHistoryListHarnessReady.txt" \
                 "$DOCUMENTS/AyuGramHistoryListSmokeReport.json"
+          
+          # Run the actual in-app save implementation against a two-file album and
+          # a text-only message before the separate unauthenticated History UI fixture.
+          # This catches regressions in the multi-media path without using a fake UI.
+          rm -rf "$DOCUMENTS/AyuGram" "$DOCUMENTS/Telegram/AyuGram"
+          set +e
+          feature_smoke_launch=$(xcrun simctl launch --terminate-running-process "$DEVICE_UDID" "$bundle_id" -AyuGramFullSmokeTest 2>&1)
+          feature_smoke_rc=$?
+          set -e
+          echo "$feature_smoke_launch"
+          test "$feature_smoke_rc" -eq 0 || {
+            echo "AyuGram save regression-test launch failed." >&2
+            exit "$feature_smoke_rc"
+          }
+          feature_report="$DOCUMENTS/AyuGram/AyuGramSmokeReport.json"
+          for attempt in $(seq 1 45); do
+            if [ -s "$feature_report" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ ! -s "$feature_report" ]; then
+            echo "AyuGram save regression report was not created." >&2
+            xcrun simctl spawn "$DEVICE_UDID" log show --last 2m --style compact --predicate 'process == "Telegram"' | tail -250 || true
+            exit 1
+          fi
+          python3 - "$feature_report" <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          print("AyuGram save regression report:")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          items = {item.get("name"): item for item in report.get("items", [])}
+          required = ("History → Saved media copy", "History → Saved text copy")
+          for name in required:
+              assert name in items, f"Missing runtime check: {name}"
+              assert items[name].get("passed") is True, items[name]
+          print("Multi-media Save and text-only Save runtime checks passed.")
+          PY
+          xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" >/dev/null 2>&1 || true
+
           set +e
           launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest -AyuGramHistoryMenuOnlySmokeTest 2>&1)
           launch_rc=$?
