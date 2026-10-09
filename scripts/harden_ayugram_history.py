@@ -806,6 +806,52 @@ if "AyuHistoryBubbleItemNode" not in ui_text:
     )
     ui.write_text(ui_text)
 
+# Enforce the style on the actual file contents even if a prior helper already inserted a bubble node.
+# The source may contain an older version of the node, so checking only the template is insufficient.
+if "AyuHistoryBubbleItemNode" not in ui_text:
+    history_enum_marker = "private enum AyuHistoryEntry: ItemListNodeEntry {"
+    enum_start = ui_text.find(history_enum_marker)
+    arguments_marker = "private final class AyuSettingsArguments {"
+    arguments_start = ui_text.find(arguments_marker, enum_start)
+    if enum_start < 0 or arguments_start < 0:
+        raise SystemExit("Could not locate History entries to install chat-bubble UI")
+    ui_text = ui_text[:enum_start] + history_preview_helper + "\n\n" + ui_text[arguments_start:]
+
+ui_text, bubble_count = re.subn(
+    r'let bubbleWidth = [^\n]+',
+    'let bubbleWidth = min(max(params.width * 0.80, 220.0), min(params.width - 24.0, 340.0))',
+    ui_text,
+    count=1,
+)
+if bubble_count != 1:
+    raise SystemExit("Could not apply Telegram-style bubble width to the actual History UI source")
+ui_text = ui_text.replace("self.timeLabel.textAlignment = .right", "self.timeLabel.textAlignment = .left", 1)
+sender_color = """self.senderLabel.textColor = UIColor { trait in
+                    if trait.userInterfaceStyle == .dark {
+                        return UIColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1.0)
+                    }
+                    return UIColor(red: 0.10, green: 0.42, blue: 0.73, alpha: 1.0)
+                }"""
+ui_text = re.sub(
+    r'self\.senderLabel\.textColor = UIColor\.label',
+    lambda _: sender_color,
+    ui_text,
+    count=1,
+)
+ui_text = re.sub(
+    r'self\.senderLabel\.text = [^\n]+',
+    'self.senderLabel.text = item.senderName.isEmpty ? "Unknown sender" : item.senderName',
+    ui_text,
+    count=1,
+)
+ui_text = re.sub(
+    r'self\.timeLabel\.frame = CGRect\([^\n]+\)',
+    'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)',
+    ui_text,
+    count=1,
+)
+ui.write_text(ui_text)
+
 if "AyuHistoryBubbleItem" not in ui_text or "savePressed" not in ui_text or "mediaPressed" not in ui_text:
     raise SystemExit("Saved Messages-style History bubble UI missing")
 
@@ -814,7 +860,7 @@ archive_text = archive.read_text()
 ui_text = ui.read_text()
 if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_text:
     raise SystemExit("Saved action implementation missing")
-if "AyuGramMediaArchive.saveToSaved(message: message)" not in ui_text:
+if "AyuGramMediaArchive.saveToSaved(message: message)" not in ui_text and "AyuGramMediaArchive.saveToSaved(message: item.message)" not in ui_text:
     raise SystemExit("History Save action wiring missing")
 if '.appendingPathComponent("Saved", isDirectory: true)' not in archive_text:
     raise SystemExit("Saved folder path missing")
