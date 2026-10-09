@@ -107,6 +107,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
     private func showMenu() {
         self.showingHistory = false
         self.clearStack()
+        self.view.backgroundColor = UIColor.systemGroupedBackground
         self.addTitle("Group Info")
         self.addSubtitle("CI UI test harness • simulator has no signed-in Telegram session")
 
@@ -157,20 +158,78 @@ private final class AyuGramHistoryHarnessController: UIViewController {
     private func showHistory() {
         self.showingHistory = true
         self.clearStack()
-        self.addTitle("AyuGram History")
-        self.addSubtitle("Deleted • Test Group")
+        self.view.backgroundColor = UIColor { trait in
+            if trait.userInterfaceStyle == .dark {
+                return UIColor(red: 0.07, green: 0.08, blue: 0.09, alpha: 1.0)
+            }
+            return UIColor(red: 0.92, green: 0.94, blue: 0.96, alpha: 1.0)
+        }
+
+        // Conversation-style header, similar to opening a Telegram group chat.
+        let header = UIStackView()
+        header.axis = .horizontal
+        header.alignment = .center
+        header.spacing = 8.0
+        header.heightAnchor.constraint(equalToConstant: 46.0).isActive = true
+
+        let backButton = UIButton(type: .system)
+        backButton.setTitle("‹", for: .normal)
+        backButton.titleLabel?.font = UIFont.systemFont(ofSize: 34.0, weight: .regular)
+        backButton.accessibilityLabel = "Back to group menu"
+        backButton.widthAnchor.constraint(equalToConstant: 36.0).isActive = true
+        backButton.heightAnchor.constraint(equalToConstant: 42.0).isActive = true
+        backButton.addTarget(self, action: #selector(self.showMenuPressed), for: .touchUpInside)
+
+        let titleStack = UIStackView()
+        titleStack.axis = .vertical
+        titleStack.alignment = .leading
+        titleStack.spacing = 2.0
+        let title = UILabel()
+        title.text = "AyuGram History"
+        title.font = UIFont.systemFont(ofSize: 18.0, weight: .semibold)
+        title.textColor = UIColor.label
+        let subtitle = UILabel()
+        subtitle.text = "Test Group"
+        subtitle.font = UIFont.systemFont(ofSize: 12.0)
+        subtitle.textColor = UIColor.secondaryLabel
+        titleStack.addArrangedSubview(title)
+        titleStack.addArrangedSubview(subtitle)
+        header.addArrangedSubview(backButton)
+        header.addArrangedSubview(titleStack)
+        header.addArrangedSubview(UIView())
+        self.contentStack.addArrangedSubview(header)
+
+        // Incoming Telegram-style message bubble, constrained to chat-like width.
+        let messageRow = UIStackView()
+        messageRow.axis = .horizontal
+        messageRow.alignment = .top
+        messageRow.spacing = 0.0
+
         let card = UIStackView()
         card.axis = .vertical
         card.alignment = .fill
-        card.spacing = 8.0
-        card.layoutMargins = UIEdgeInsets(top: 16.0, left: 16.0, bottom: 16.0, right: 16.0)
+        card.spacing = 7.0
+        card.layoutMargins = UIEdgeInsets(top: 11.0, left: 13.0, bottom: 8.0, right: 13.0)
         card.isLayoutMarginsRelativeArrangement = true
-        card.backgroundColor = UIColor.secondarySystemGroupedBackground
-        card.layer.cornerRadius = 16.0
+        card.backgroundColor = UIColor { trait in
+            if trait.userInterfaceStyle == .dark {
+                return UIColor(red: 0.14, green: 0.16, blue: 0.18, alpha: 1.0)
+            }
+            return UIColor.white
+        }
+        card.layer.cornerRadius = 17.0
+        card.layer.masksToBounds = true
+        card.widthAnchor.constraint(equalTo: messageRow.widthAnchor, multiplier: 0.82).isActive = true
+
         let sender = UILabel()
         sender.text = "Smoke Test Sender"
-        sender.font = UIFont.systemFont(ofSize: 15.0, weight: .semibold)
-        sender.textColor = UIColor.label
+        sender.font = UIFont.systemFont(ofSize: 14.0, weight: .semibold)
+        sender.textColor = UIColor { trait in
+            if trait.userInterfaceStyle == .dark {
+                return UIColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1.0)
+            }
+            return UIColor(red: 0.10, green: 0.42, blue: 0.73, alpha: 1.0)
+        }
         let body = UILabel()
         body.text = "AyuGram deleted-history smoke test"
         body.font = UIFont.systemFont(ofSize: 16.0)
@@ -178,15 +237,16 @@ private final class AyuGramHistoryHarnessController: UIViewController {
         body.numberOfLines = 0
         let metadata = UILabel()
         metadata.text = "Deleted: just now"
-        metadata.font = UIFont.systemFont(ofSize: 12.0)
+        metadata.font = UIFont.systemFont(ofSize: 11.0)
+        metadata.textAlignment = .right
         metadata.textColor = UIColor.systemRed
         card.addArrangedSubview(sender)
         card.addArrangedSubview(body)
         card.addArrangedSubview(metadata)
-        self.contentStack.addArrangedSubview(card)
+        messageRow.addArrangedSubview(card)
+        messageRow.addArrangedSubview(UIView())
+        self.contentStack.addArrangedSubview(messageRow)
 
-        let back = self.makeRow("Back to group menu", symbol: "‹", action: #selector(self.showMenuPressed))
-        self.contentStack.addArrangedSubview(back)
         self.addSubtitle("Synthetic deleted-message fixture. No real Telegram chat session is authenticated in this Simulator.")
         self.writeMarker(self.historyMarkerURL, text: "History list harness with a deleted test entry is visible")
         self.writeReport(menuVisible: false, historyVisible: true)
