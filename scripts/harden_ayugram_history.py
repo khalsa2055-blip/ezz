@@ -260,6 +260,15 @@ for required in [
         raise SystemExit(f"AyuGram manual-save/transfer action missing: {required}")
 
 
+# Keep History out of AyuGram Preferences; only the group/profile More menu opens it.
+old_settings_history_entries = ```        .history,
+        .clearDeletedHistory,
+```
+if old_settings_history_entries in ui_text:
+    ui_text = ui_text.replace(old_settings_history_entries, "", 1)
+elif ".clearDeletedHistory," in ui_text.split("private func ayuSettingsEntries", 1)[1].split("public func ayuGramSettingsScreen", 1)[0]:
+    raise SystemExit("Could not remove History shortcut from AyuGram Preferences")
+
 ui_text = ui_text.replace(
     'let title = dialogID == nil ? "AyuGram History" : "Group History"',
     'let title = "AyuGram History"',
@@ -1176,40 +1185,8 @@ if more_text.count('text: "AyuGram History"') != 1:
 
 more_menu.write_text(more_text)
 
-# 6c) Main Telegram "More"/Settings tab: expose a global AyuGram History entry.
-# This is the screen the user reaches from Telegram's bottom-right More/Settings tab.
-# It opens the same History screen without requiring a group/profile menu first.
-settings_items = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift"
-if not settings_items.exists():
-    raise SystemExit(f"Missing account More/Settings items source: {settings_items}")
-settings_text = settings_items.read_text()
-if "import AyuGramSettingsScreen" not in settings_text:
-    settings_text = settings_text.replace(
-        "import AccountContext\n",
-        "import AccountContext\nimport AyuGramSettingsScreen\n",
-        1,
-    )
-
-global_history_action = '''    items[.extra]!.append(PeerInfoScreenActionItem(
-        id: 900,
-        text: "AyuGram History",
-        icon: UIImage(systemName: "clock.arrow.circlepath"),
-        action: {
-            let controller = ayuGramHistoryScreen(context: context)
-            context.sharedContext.mainWindow?.present(controller, on: .root)
-        }
-    ))
-
-'''
-settings_anchor = '''    if let settings = data.globalSettings {
-'''
-if 'id: 900,\n        text: "AyuGram History"' not in settings_text:
-    if settings_anchor not in settings_text:
-        raise SystemExit("Main More/Settings extra-section anchor not found")
-    settings_text = settings_text.replace(settings_anchor, global_history_action + settings_anchor, 1)
-if settings_text.count('text: "AyuGram History"') < 1:
-    raise SystemExit("Main More/Settings AyuGram History entry was not installed")
-settings_items.write_text(settings_text)
+# 6c) Keep History group-scoped: its only entry point is the group/profile three-dot menu above.
+# Do not add a confusing global History shortcut to Telegram More/Settings.
 
 # 7) History bubble UI: show real sender names and both timestamps.
 
