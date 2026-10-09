@@ -25,7 +25,7 @@ if "private final class AyuGramHistoryHarnessController" not in s:
         self.displayNavigationBar = false
     }
 
-    required init?(coder: NSCoder) {
+    required init(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
