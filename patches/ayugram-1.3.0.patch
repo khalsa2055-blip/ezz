@@ -416,7 +416,7 @@ new file mode 100644
 +            if files.count > 1 {
 +                for (index, file) in files.enumerated() {
 +                    let ext = file.pathExtension.isEmpty ? (Self.pathExtension(for: message.mimeType) ?? "bin") : file.pathExtension
-+                    let destination = mediaRoot.appendingPathComponent("media-\(index + 1).\(ext)")
++                    let destination = mediaRoot.appendingPathComponent("message-\(message.messageID)-media-\(index + 1).\(ext)")
 +                    do {
 +                        if !FileManager.default.fileExists(atPath: destination.path) {
 +                            try FileManager.default.copyItem(at: file, to: destination)
@@ -428,7 +428,7 @@ new file mode 100644
 +                }
 +            } else {
 +                let ext = sourceURL.pathExtension.isEmpty ? (Self.pathExtension(for: message.mimeType) ?? "bin") : sourceURL.pathExtension
-+                let destination = mediaRoot.appendingPathComponent("media.\(ext)")
++                let destination = mediaRoot.appendingPathComponent("message-\(message.messageID)-media.\(ext)")
 +                do {
 +                    if !FileManager.default.fileExists(atPath: destination.path) {
 +                        try FileManager.default.copyItem(at: sourceURL, to: destination)
