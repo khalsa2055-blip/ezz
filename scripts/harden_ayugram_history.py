@@ -786,6 +786,7 @@ private enum AyuHistoryEntry: ItemListNodeEntry {
         }
     }
 }
+'''
 
 # Replace the entire History item model with the Telegram-style message-bubble UI.
 # Do this unconditionally: a stale class/comment name must not skip installing the layout.
@@ -817,7 +818,6 @@ if '.appendingPathComponent("Saved", isDirectory: true)' not in archive_text:
 # Add a runtime smoke test proving a media copy really reaches the Saved folder.
 smoke_text = smoke.read_text()
 anchor = '        add("history display labels") {'
-'''
 if anchor not in smoke_text:
     raise SystemExit("Smoke test saved-copy anchor missing")
 if 'add("History → Saved copy")' not in smoke_text:
