@@ -99,7 +99,21 @@ jobs:
               continue
             fi
             echo "Initializing submodule: $module_path"
-            git submodule update --init --recursive --jobs 4 -- "$module_path"
+            initialized=0
+            for attempt in 1 2 3; do
+              if git submodule update --init --recursive --jobs 4 -- "$module_path"; then
+                initialized=1
+                break
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "Submodule fetch failed for $module_path (attempt $attempt/3); retrying in 5 seconds..."
+                sleep 5
+              fi
+            done
+            if [ "$initialized" -ne 1 ]; then
+              echo "::error::Unable to initialize submodule $module_path after 3 attempts"
+              exit 1
+            fi
           done < <(git config -f .gitmodules --get-regexp path)
 
           # Use the latest commit that is actually present in the official rlottie
