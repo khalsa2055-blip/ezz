@@ -59,15 +59,15 @@ settings_store = root / "submodules/AyuGramIOS/Sources/AyuSettingsStore.swift"
 if not settings_store.exists():
     raise SystemExit(f"Missing AyuGram settings store: {settings_store}")
 settings_store_text = settings_store.read_text()
-old_settings_load = ```        if FileManager.default.fileExists(atPath: url.path) {
+old_settings_load = """        if FileManager.default.fileExists(atPath: url.path) {
             let data = try Data(contentsOf: url)
             self.cached = try decoder.decode(AyuSettings.self, from: data)
         } else {
             self.cached = initial
             try persist(initial)
         }
-```
-new_settings_load = ```        if FileManager.default.fileExists(atPath: url.path) {
+"""
+new_settings_load = """        if FileManager.default.fileExists(atPath: url.path) {
             let data = try Data(contentsOf: url)
             if let decoded = try? decoder.decode(AyuSettings.self, from: data) {
                 self.cached = decoded
@@ -97,7 +97,7 @@ new_settings_load = ```        if FileManager.default.fileExists(atPath: url.pat
             self.cached = initial
             try persist(initial)
         }
-```
+"""
 if old_settings_load in settings_store_text:
     settings_store_text = settings_store_text.replace(old_settings_load, new_settings_load, 1)
 elif "Older versions may not contain every field introduced later." not in settings_store_text:
