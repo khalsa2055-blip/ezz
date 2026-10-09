@@ -592,7 +592,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
         self.bodyLabel.font = UIFont.systemFont(ofSize: 16.0)
         self.bodyLabel.numberOfLines = 0
         self.timeLabel.font = UIFont.systemFont(ofSize: 11.0)
-        self.timeLabel.textAlignment = .right
+        self.timeLabel.textAlignment = .left
         self.mediaView.layer.cornerRadius = 12.0
         self.mediaView.layer.masksToBounds = true
         self.mediaView.contentMode = .scaleAspectFill
@@ -623,7 +623,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
             guard let self else {
                 return (ListViewItemNodeLayout(contentSize: CGSize(width: params.width, height: 1.0), insets: UIEdgeInsets()), {})
             }
-            let bubbleWidth = min(max(params.width - 24.0, 220.0), 360.0)
+            let bubbleWidth = min(max(params.width * 0.80, 220.0), min(params.width - 24.0, 340.0))
             let textWidth = bubbleWidth - 28.0
             let bodyRect = (item.displayText as NSString).boundingRect(
                 with: CGSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
@@ -642,12 +642,28 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
             )
             return (layout, {
                 self.item = item
-                self.bubbleView.backgroundColor = UIColor.secondarySystemBackground
-                self.senderLabel.textColor = UIColor.label
-                self.kindLabel.textColor = UIColor.systemRed
+                self.view.backgroundColor = UIColor { trait in
+                    if trait.userInterfaceStyle == .dark {
+                        return UIColor(red: 0.07, green: 0.08, blue: 0.09, alpha: 1.0)
+                    }
+                    return UIColor(red: 0.92, green: 0.94, blue: 0.96, alpha: 1.0)
+                }
+                self.bubbleView.backgroundColor = UIColor { trait in
+                    if trait.userInterfaceStyle == .dark {
+                        return UIColor(red: 0.14, green: 0.16, blue: 0.18, alpha: 1.0)
+                    }
+                    return UIColor.white
+                }
+                self.senderLabel.textColor = UIColor { trait in
+                    if trait.userInterfaceStyle == .dark {
+                        return UIColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1.0)
+                    }
+                    return UIColor(red: 0.10, green: 0.42, blue: 0.73, alpha: 1.0)
+                }
+                self.kindLabel.textColor = item.message.isDeleted ? UIColor.systemRed : UIColor.systemOrange
                 self.bodyLabel.textColor = UIColor.label
                 self.timeLabel.textColor = UIColor.secondaryLabel
-                self.senderLabel.text = "From \\(item.message.fromID)"
+                self.senderLabel.text = item.senderName.isEmpty ? "Unknown sender" : item.senderName
                 self.kindLabel.text = item.displayKind
                 self.bodyLabel.text = item.displayText
                 self.timeLabel.text = item.displayDate
@@ -669,7 +685,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 }
 
                 let footerY = hasMedia ? 49.0 + bodyHeight + 10.0 + mediaHeight + 6.0 : 49.0 + bodyHeight + 6.0
-                self.timeLabel.frame = CGRect(x: bubbleWidth - 100.0, y: footerY, width: 64.0, height: 20.0)
+                self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)
                 self.saveButton.frame = CGRect(x: bubbleWidth - 38.0, y: footerY - 5.0, width: 30.0, height: 30.0)
             })
         }
@@ -1267,6 +1283,13 @@ if "let deletionDate" not in u:
     else:
         raise SystemExit("History date anchor not found")
 
+u = u.replace(
+    "let kind = AyuHistoryDisplay.label(isDeleted: message.isDeleted, settings: settings)",
+    'let kind = message.isDeleted ? "Deleted message" : "Edited message"',
+    1,
+)
+u = u.replace("formatter.dateStyle = .medium", "formatter.dateStyle = .short", 1)
+
 # The current History source uses .item(id, text), not a .message entry.
 # Preserve that established ItemList model and enrich its displayed text.
 item_match = re.search(r'(?m)^(\s*)entries\.append\(\.item\(message\.fakeID, (.+)\)\)', u)
@@ -1351,6 +1374,13 @@ if context_menu_text.count("AyuGram Save") != 1:
 save_tail = context_menu_text.split("AyuGram Save", 1)[1].split("})))", 1)[0]
 if "isCopyProtected()" in save_tail or "containsSecretMedia" in save_tail:
     raise SystemExit("Manual AyuGram Save must not reuse Telegram copy-protection gate")
+if 'let bubbleWidth = min(max(params.width * 0.80' not in u:
+    raise SystemExit("Telegram-style narrow message bubble layout missing")
+if 'self.senderLabel.textColor = UIColor { trait in' not in u or 'Unknown sender' not in u:
+    raise SystemExit("Telegram-style sender styling missing")
+if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0' not in u:
+    raise SystemExit("History message/deletion timestamps would be clipped")
+
 if 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
 
