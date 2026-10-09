@@ -388,7 +388,16 @@ jobs:
             exit 1
           fi
 
+          # Remove the app first so an old Documents container cannot make a stale
+          # marker/report look like a successful test on a new launch.
+          xcrun simctl uninstall "$DEVICE_UDID" "$bundle_id" >/dev/null 2>&1 || true
           xcrun simctl install "$DEVICE_UDID" "$app"
+          APP_CONTAINER=$(xcrun simctl get_app_container "$DEVICE_UDID" "$bundle_id" data)
+          DOCUMENTS="$APP_CONTAINER/Documents"
+          mkdir -p "$DOCUMENTS"
+          rm -f "$DOCUMENTS/AyuGramHistoryMenuHarnessReady.txt" \
+                "$DOCUMENTS/AyuGramHistoryListHarnessReady.txt" \
+                "$DOCUMENTS/AyuGramHistoryListSmokeReport.json"
           set +e
           launch_output=$(xcrun simctl launch "$DEVICE_UDID" "$bundle_id" -AyuGramHistoryListSmokeTest 2>&1)
           launch_rc=$?
@@ -407,9 +416,8 @@ jobs:
           # The Simulator has no authenticated Telegram session, so this
           # launch-only harness renders the group More menu and a synthetic deleted
           # History row. The production menu action is separately verified above.
-          APP_CONTAINER=$(xcrun simctl get_app_container "$DEVICE_UDID" "$bundle_id" data)
-          DOCUMENTS="$APP_CONTAINER/Documents"
           echo "Simulator app data container: $APP_CONTAINER"
+          echo "Cleared stale History smoke markers before launch."
           mkdir -p ci-artifacts/smoke
           menu_marker=""
           history_marker=""
@@ -430,6 +438,33 @@ jobs:
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Menu.png
           test -s ci-artifacts/smoke/AyuGram-History-Menu.png
 
+          cat > ci-artifacts/smoke/verify-history-screenshots.swift <<'SWIFT'
+          import Foundation
+          import Vision
+          import ImageIO
+
+          func recognizedText(_ path: String) throws -> String {
+              let url = URL(fileURLWithPath: path)
+              let request = VNRecognizeTextRequest()
+              request.recognitionLevel = .accurate
+              request.usesLanguageCorrection = false
+              let handler = VNImageRequestHandler(url: url)
+              try handler.perform([request])
+              return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+          }
+
+          let menuPath = "ci-artifacts/smoke/AyuGram-History-Menu.png"
+          let menuText = try recognizedText(menuPath)
+          print("Menu screenshot OCR:\n\(menuText)")
+          guard menuText.localizedCaseInsensitiveContains("Group Info"),
+                menuText.localizedCaseInsensitiveContains("AyuGram History"),
+                !menuText.localizedCaseInsensitiveContains("Start Messaging") else {
+              fputs("Menu screenshot is not the History harness screen.\n", stderr)
+              exit(1)
+          }
+          SWIFT
+          swift ci-artifacts/smoke/verify-history-screenshots.swift ci-artifacts/smoke/AyuGram-History-Menu.png
+
           for attempt in $(seq 1 30); do
             history_marker=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListHarnessReady.txt" -print -quit 2>/dev/null || true)
             report=$(find "$DOCUMENTS" -type f -name "AyuGramHistoryListSmokeReport.json" -print -quit 2>/dev/null || true)
@@ -441,6 +476,32 @@ jobs:
 
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-List.png
           test -s ci-artifacts/smoke/AyuGram-History-List.png
+          cat > ci-artifacts/smoke/verify-history-list-screenshot.swift <<'SWIFT'
+          import Foundation
+          import Vision
+          import ImageIO
+
+          func recognizedText(_ path: String) throws -> String {
+              let url = URL(fileURLWithPath: path)
+              let request = VNRecognizeTextRequest()
+              request.recognitionLevel = .accurate
+              request.usesLanguageCorrection = false
+              let handler = VNImageRequestHandler(url: url)
+              try handler.perform([request])
+              return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+          }
+
+          let path = "ci-artifacts/smoke/AyuGram-History-List.png"
+          let text = try recognizedText(path)
+          print("History screenshot OCR:\n\(text)")
+          guard text.localizedCaseInsensitiveContains("Smoke Test Sender"),
+                text.localizedCaseInsensitiveContains("Deleted: just now"),
+                !text.localizedCaseInsensitiveContains("Start Messaging") else {
+              fputs("History screenshot is not the deleted-message history harness screen.\n", stderr)
+              exit(1)
+          }
+          SWIFT
+          swift ci-artifacts/smoke/verify-history-list-screenshot.swift ci-artifacts/smoke/AyuGram-History-List.png
           if [ -z "$report" ] || [ ! -f "$report" ]; then
             echo "History harness report was not created." >&2
             exit 1
