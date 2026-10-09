@@ -229,16 +229,16 @@ if "AyuGramHistoryHarnessController(), on: .root" not in s:
                 guard let self else {
                     return
                 }
-                if let scene = self.nativeWindow?.windowScene {
-                    let overlay = UIWindow(windowScene: scene)
-                    overlay.windowLevel = UIWindow.Level.alert + 1
-                    overlay.backgroundColor = UIColor.systemGroupedBackground
-                    overlay.rootViewController = AyuGramHistoryHarnessController(nibName: nil, bundle: nil)
-                    AyuGramHistoryHarnessWindowHolder.window = overlay
-                    overlay.makeKeyAndVisible()
-                } else {
-                    self.mainWindow.present(AyuGramHistoryHarnessController(nibName: nil, bundle: nil), on: .root)
+                guard let scene = self.nativeWindow?.windowScene else {
+                    print("AyuGram History smoke harness could not find the app window scene")
+                    return
                 }
+                let overlay = UIWindow(windowScene: scene)
+                overlay.windowLevel = UIWindow.Level.alert + 1
+                overlay.backgroundColor = UIColor.systemGroupedBackground
+                overlay.rootViewController = AyuGramHistoryHarnessController(nibName: nil, bundle: nil)
+                AyuGramHistoryHarnessWindowHolder.window = overlay
+                overlay.makeKeyAndVisible()
             }
         }
 
