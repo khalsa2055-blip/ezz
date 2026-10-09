@@ -507,6 +507,13 @@ jobs:
             sleep 1
           done
 
+          if [ -z "$history_marker" ] || [ ! -f "$history_marker" ]; then
+            xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-Test-Failed.png
+            echo "History harness did not transition to its message-bubble list." >&2
+            xcrun simctl spawn "$DEVICE_UDID" log show --last 2m --style compact --predicate 'process == "Telegram"' | tail -200 || true
+            exit 1
+          fi
+
           xcrun simctl io "$DEVICE_UDID" screenshot ci-artifacts/smoke/AyuGram-History-List.png
           test -s ci-artifacts/smoke/AyuGram-History-List.png
           cat > ci-artifacts/smoke/verify-history-screenshots.swift <<'SWIFT'
