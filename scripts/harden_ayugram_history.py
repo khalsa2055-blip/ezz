@@ -845,6 +845,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
         self.bodyLabel.numberOfLines = 0
         self.timeLabel.font = UIFont.systemFont(ofSize: 11.0)
         self.timeLabel.textAlignment = .left
+        self.timeLabel.numberOfLines = 2
         self.mediaView.layer.cornerRadius = 12.0
         self.mediaView.layer.masksToBounds = true
         self.mediaView.contentMode = .scaleAspectFill
@@ -888,7 +889,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
             let bodyHeight = item.displayText.isEmpty && hasMedia ? 0.0 : max(20.0, ceil(bodyRect.height))
             let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
             let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
-            let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 24.0 + 8.0
+            let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 36.0 + 8.0
             let layout = ListViewItemNodeLayout(
                 contentSize: CGSize(width: params.width, height: contentHeight),
                 insets: UIEdgeInsets(top: 4.0, left: 0.0, bottom: 4.0, right: 0.0)
@@ -930,7 +931,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
 
                 let footerY = hasMedia ? 49.0 + bodyHeight + 10.0 + mediaHeight + 6.0 : 49.0 + bodyHeight + 6.0
                 self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)
-                self.saveButton.frame = CGRect(x: bubbleWidth - 38.0, y: footerY - 5.0, width: 30.0, height: 30.0)
+                self.saveButton.frame = CGRect(x: bubbleWidth - 38.0, y: footerY + 1.0, width: 30.0, height: 30.0)
             })
         }
     }
@@ -1873,7 +1874,7 @@ item_match = re.search(r'(?m)^(\s*)entries\.append\(\.item\(message\.fakeID, (.+
 if item_match:
     indent = item_match.group(1)
     sender = indent + 'let sender = message.fromName ?? ""\n'
-    meta = indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
+    meta = indent + 'let meta = deletionDate.map { "Sent: \\(date)\\nDeleted: \\($0)" } ?? date\n'
     if "case message(Int64, AyuMessage" in u:
         replacement = sender + meta + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
     else:
@@ -1925,7 +1926,7 @@ u = re.sub(
 )
 u = re.sub(
     r'self\.timeLabel\.frame = CGRect\([^\n]+\)',
-    'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)',
+    'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 32.0)',
     u,
     count=1,
 )
@@ -2048,8 +2049,10 @@ if 'AVAssetImageGenerator(asset: asset)' not in u or 'generateCGImagesAsynchrono
     raise SystemExit("Video thumbnail preview implementation missing")
 if 'Unknown sender' in u:
     raise SystemExit("History must not fall back to the vague Unknown sender label")
-if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0' not in u:
+if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 32.0)' not in u:
     raise SystemExit("History message/deletion timestamps would be clipped")
+if "self.timeLabel.numberOfLines = 2" not in u:
+    raise SystemExit("History list must show sent and deleted timestamps on two lines")
 
 if 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
