@@ -661,6 +661,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 return (ListViewItemNodeLayout(contentSize: CGSize(width: params.width, height: 1.0), insets: UIEdgeInsets()), {})
             }
             let bubbleWidth = min(max(params.width * 0.80, 220.0), min(params.width - 24.0, 340.0))
+            let outgoing = item.message.fromID == item.message.userID
             let textWidth = bubbleWidth - 28.0
             let bodyRect = (item.displayText as NSString).boundingRect(
                 with: CGSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
@@ -686,6 +687,12 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                     return UIColor(red: 0.92, green: 0.94, blue: 0.96, alpha: 1.0)
                 }
                 self.bubbleView.backgroundColor = UIColor { trait in
+                    if outgoing {
+                        if trait.userInterfaceStyle == .dark {
+                            return UIColor(red: 0.13, green: 0.25, blue: 0.34, alpha: 1.0)
+                        }
+                        return UIColor(red: 0.84, green: 0.93, blue: 1.0, alpha: 1.0)
+                    }
                     if trait.userInterfaceStyle == .dark {
                         return UIColor(red: 0.14, green: 0.16, blue: 0.18, alpha: 1.0)
                     }
@@ -705,7 +712,8 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 self.bodyLabel.text = item.displayText
                 self.timeLabel.text = item.displayDate
 
-                self.bubbleView.frame = CGRect(x: 12.0, y: 4.0, width: bubbleWidth, height: contentHeight - 8.0)
+                let bubbleX = outgoing ? max(12.0, params.width - bubbleWidth - 12.0) : 12.0
+                self.bubbleView.frame = CGRect(x: bubbleX, y: 4.0, width: bubbleWidth, height: contentHeight - 8.0)
                 self.senderLabel.frame = CGRect(x: 14.0, y: 9.0, width: bubbleWidth - 64.0, height: 18.0)
                 self.kindLabel.frame = CGRect(x: 14.0, y: 29.0, width: bubbleWidth - 28.0, height: 16.0)
                 self.bodyLabel.frame = CGRect(x: 14.0, y: 49.0, width: textWidth, height: bodyHeight)
@@ -1440,7 +1448,7 @@ if bubble_width_count != 1:
 u = u.replace("self.timeLabel.textAlignment = .right", "self.timeLabel.textAlignment = .left", 1)
 u = re.sub(
     r'self\.senderLabel\.text = [^\n]+',
-    'self.senderLabel.text = item.senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "User \\(item.message.fromID)" : item.senderName',
+    'self.senderLabel.text = outgoing ? "You" : (item.senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "User \\(item.message.fromID)" : item.senderName)',
     u,
     count=1,
 )
@@ -1452,6 +1460,50 @@ u = re.sub(
 )
 if bubble_width_line not in u:
     raise SystemExit("Final Telegram-style History bubble width was not retained")
+
+# Keep History ordered like a conversation: oldest at the top, newest at the bottom,
+# then position the initial viewport on the newest captured message.
+descending_loop = "for message in messages.sorted(by: { $0.fakeID > $1.fakeID }) {"
+ascending_loop = "for message in messages.sorted(by: { $0.fakeID < $1.fakeID }) {"
+if descending_loop in u:
+    u = u.replace(descending_loop, ascending_loop, 1)
+elif ascending_loop not in u:
+    raise SystemExit("History message ordering loop not found")
+
+old_list_state = """        let listState = ItemListNodeState(
+            presentationData: ItemListPresentationData(presentationData),
+            entries: ayuHistoryEntries(messages, settings: AyuGramRuntime.settings(accountID: accountID) ?? AyuSettings()),
+            style: .blocks,
+            animateChanges: false
+        )"""
+new_list_state = """        let historyEntries = ayuHistoryEntries(messages, settings: AyuGramRuntime.settings(accountID: accountID) ?? AyuSettings())
+        let initialScrollToItem: ListViewScrollToItem? = {
+            guard !messages.isEmpty, !historyEntries.isEmpty else {
+                return nil
+            }
+            return ListViewScrollToItem(
+                index: historyEntries.count - 1,
+                position: .bottom(0.0),
+                animated: false,
+                curve: .Default(duration: 0.0),
+                directionHint: .Down
+            )
+        }()
+        let listState = ItemListNodeState(
+            presentationData: ItemListPresentationData(presentationData),
+            entries: historyEntries,
+            style: .blocks,
+            initialScrollToItem: initialScrollToItem,
+            animateChanges: false
+        )"""
+if old_list_state in u:
+    u = u.replace(old_list_state, new_list_state, 1)
+elif "initialScrollToItem: initialScrollToItem" not in u:
+    raise SystemExit("Could not add initial scroll-to-latest for History")
+if "position: .bottom(0.0)" not in u or "historyEntries.count - 1" not in u:
+    raise SystemExit("History initial scroll-to-latest contract missing")
+if "let outgoing = item.message.fromID == item.message.userID" not in u or "let bubbleX = outgoing ?" not in u:
+    raise SystemExit("Incoming/outgoing message alignment missing")
 
 ui.write_text(u)
 
