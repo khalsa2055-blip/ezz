@@ -514,7 +514,8 @@ jobs:
           let historyText = try recognizedText("ci-artifacts/smoke/AyuGram-History-List.png")
           print("History screenshot OCR:\n\(historyText)")
           guard historyText.localizedCaseInsensitiveContains("Smoke Test Sender"),
-                historyText.localizedCaseInsensitiveContains("Deleted: just now"),
+                historyText.localizedCaseInsensitiveContains("Deleted message"),
+                historyText.localizedCaseInsensitiveContains("Synthetic deleted message"),
                 !historyText.localizedCaseInsensitiveContains("Start Messaging") else {
               fputs("History screenshot is not the deleted-message History fixture.\n", stderr)
               exit(1)

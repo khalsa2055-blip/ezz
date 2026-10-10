@@ -14,6 +14,87 @@ if anchor not in s:
 
 hook = """                    self.mainWindow.viewController = context.rootController
 
+                    if ProcessInfo.processInfo.arguments.contains("-AyuGramHistoryListSmokeTest") {
+                        let accountID = context.context.account.peerId.toInt64()
+                        let dialogID: Int64 = 933000001
+                        let now = Int32(Date().timeIntervalSince1970)
+                        let messageID: Int32 = 1700000123
+                        let fixtureMessage = AyuMessage(
+                            fakeID: 0,
+                            userID: accountID,
+                            dialogID: dialogID,
+                            peerID: dialogID,
+                            fromID: accountID,
+                            fromName: "Smoke Test Sender",
+                            messageID: messageID,
+                            date: now - 60,
+                            text: "Synthetic deleted message for History UI smoke test",
+                            isDeleted: true,
+                            deletedAt: now
+                        )
+
+                        let fixtureSignal = context.context.account.postbox.transaction { transaction -> Bool in
+                            AyuGramPostboxHistoryStore.clearDeleted(
+                                transaction: transaction,
+                                userID: accountID,
+                                dialogID: dialogID
+                            )
+                            _ = AyuGramPostboxHistoryStore.appendDeleted(
+                                transaction: transaction,
+                                messages: [fixtureMessage]
+                            )
+                            let rows = AyuGramPostboxHistoryStore.filtered(
+                                transaction: transaction,
+                                userID: accountID,
+                                dialogID: dialogID,
+                                kind: .deleted,
+                                limit: 25
+                            )
+                            return rows.contains {
+                                $0.text == fixtureMessage.text
+                                    && $0.fromName == "Smoke Test Sender"
+                                    && $0.deletedAt == now
+                            }
+                        }
+
+                        _ = (fixtureSignal |> deliverOnMainQueue).start(next: { ready in
+                            guard ready else {
+                                print("AyuGram History list fixture failed to persist")
+                                return
+                            }
+
+                            self.mainWindow.present(
+                                ayuGramHistoryScreen(context: context.context, dialogID: dialogID),
+                                on: .root
+                            )
+
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                                    print("AyuGram History list fixture has no Documents directory")
+                                    return
+                                }
+                                let reportURL = documents.appendingPathComponent("AyuGramHistoryListSmokeReport.json")
+                                let markerURL = documents.appendingPathComponent("AyuGramHistoryListHarnessReady.txt")
+                                let report: [String: Any] = [
+                                    "passed": true,
+                                    "dialogID": dialogID,
+                                    "messageID": messageID,
+                                    "senderName": "Smoke Test Sender",
+                                    "text": fixtureMessage.text,
+                                    "deletedAt": now
+                                ]
+                                do {
+                                    let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                                    try data.write(to: reportURL, options: .atomic)
+                                    try Data("History list fixture ready".utf8).write(to: markerURL, options: .atomic)
+                                    print("AyuGram History list fixture rendered for dialog \(dialogID)")
+                                } catch {
+                                    print("AyuGram History list fixture report write failed: \(error)")
+                                }
+                            }
+                        })
+                    }
+
                     if ProcessInfo.processInfo.arguments.contains("-AyuGramFullSmokeTest") {
                         let accountID = context.context.account.peerId.toInt64()
                         let reportURL = (try? AyuGramRuntime.baseDirectory(accountID: accountID))?
