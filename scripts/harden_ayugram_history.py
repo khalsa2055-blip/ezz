@@ -366,7 +366,7 @@ test += '''        add("History → Saved media set") {
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent("saved", isDirectory: true)
                 .appendingPathComponent("Media", isDirectory: true)
             let firstSaved = savedRoot?.appendingPathComponent("message-\\(messageID)-media-1.jpg")
             let secondSaved = savedRoot?.appendingPathComponent("message-\\(messageID)-media-2.mp4")
@@ -376,7 +376,7 @@ test += '''        add("History → Saved media set") {
             if let cleanup = savedRoot?.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() {
                 try? FileManager.default.removeItem(at: cleanup)
             }
-            return (ok, ok ? "all archived media files copied to Saved/media" : "Saved media set copy failed")
+            return (ok, ok ? "all archived media files copied to saved/media" : "Saved media set copy failed")
         }
         add("History → Saved copy") {
             let dialogID = Int64(9_800_000) + abs(accountID % 100_000)
@@ -402,13 +402,13 @@ test += '''        add("History → Saved media set") {
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent("saved", isDirectory: true)
             let savedMedia = savedRoot?.appendingPathComponent("Media").appendingPathComponent("message-\\(messageID)-media.jpg")
             let savedMetadata = savedRoot?.appendingPathComponent("Messages").appendingPathComponent("message-\\(messageID).json")
             let ok = saved
                 && (savedMedia.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (savedMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-            return (ok, ok ? "media and metadata copied to Documents/AyuGram/Saved" : "Saved copy failed")
+            return (ok, ok ? "media and metadata copied to Documents/AyuGram/saved" : "Saved copy failed")
         }
 
 '''
@@ -426,7 +426,7 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Telegram", isDirectory: true)
             .appendingPathComponent("AyuGram", isDirectory: true)
-            .appendingPathComponent("Saved", isDirectory: true)
+            .appendingPathComponent("saved", isDirectory: true)
         guard let root else { return false }
 
         let mediaRoot = root.appendingPathComponent("Media", isDirectory: true)
@@ -661,6 +661,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 return (ListViewItemNodeLayout(contentSize: CGSize(width: params.width, height: 1.0), insets: UIEdgeInsets()), {})
             }
             let bubbleWidth = min(max(params.width * 0.80, 220.0), min(params.width - 24.0, 340.0))
+            let outgoing = item.message.fromID == item.message.userID
             let textWidth = bubbleWidth - 28.0
             let bodyRect = (item.displayText as NSString).boundingRect(
                 with: CGSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
@@ -668,8 +669,8 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 attributes: [.font: UIFont.systemFont(ofSize: 16.0)],
                 context: nil
             )
-            let bodyHeight = max(20.0, ceil(bodyRect.height))
             let hasMedia = AyuGramMediaArchive.isArchivedFile(item.message.mediaPath)
+            let bodyHeight = item.displayText.isEmpty && hasMedia ? 0.0 : max(20.0, ceil(bodyRect.height))
             let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
             let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
             let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 24.0 + 8.0
@@ -686,6 +687,12 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                     return UIColor(red: 0.92, green: 0.94, blue: 0.96, alpha: 1.0)
                 }
                 self.bubbleView.backgroundColor = UIColor { trait in
+                    if outgoing {
+                        if trait.userInterfaceStyle == .dark {
+                            return UIColor(red: 0.13, green: 0.25, blue: 0.34, alpha: 1.0)
+                        }
+                        return UIColor(red: 0.84, green: 0.93, blue: 1.0, alpha: 1.0)
+                    }
                     if trait.userInterfaceStyle == .dark {
                         return UIColor(red: 0.14, green: 0.16, blue: 0.18, alpha: 1.0)
                     }
@@ -705,7 +712,8 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 self.bodyLabel.text = item.displayText
                 self.timeLabel.text = item.displayDate
 
-                self.bubbleView.frame = CGRect(x: 12.0, y: 4.0, width: bubbleWidth, height: contentHeight - 8.0)
+                let bubbleX = outgoing ? max(12.0, params.width - bubbleWidth - 12.0) : 12.0
+                self.bubbleView.frame = CGRect(x: bubbleX, y: 4.0, width: bubbleWidth, height: contentHeight - 8.0)
                 self.senderLabel.frame = CGRect(x: 14.0, y: 9.0, width: bubbleWidth - 64.0, height: 18.0)
                 self.kindLabel.frame = CGRect(x: 14.0, y: 29.0, width: bubbleWidth - 28.0, height: 16.0)
                 self.bodyLabel.frame = CGRect(x: 14.0, y: 49.0, width: textWidth, height: bodyHeight)
@@ -879,8 +887,8 @@ if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_
     raise SystemExit("Saved action implementation missing")
 if "AyuGramMediaArchive.saveToSaved(message: message)" not in ui_text and "AyuGramMediaArchive.saveToSaved(message: item.message)" not in ui_text:
     raise SystemExit("History Save action wiring missing")
-if '.appendingPathComponent("Saved", isDirectory: true)' not in archive_text:
-    raise SystemExit("Saved folder path missing")
+if '.appendingPathComponent("saved", isDirectory: true)' not in archive_text:
+    raise SystemExit("saved folder path missing")
 
 # Add a runtime smoke test proving a media copy really reaches the Saved folder.
 smoke_text = smoke.read_text()
@@ -1388,6 +1396,34 @@ u = u.replace(
 )
 u = u.replace("formatter.dateStyle = .medium", "formatter.dateStyle = .short", 1)
 
+# Media with a valid archived file gets a real image/video preview in the bubble,
+# so don't also render the old literal "(media)" placeholder. Only show a fallback
+# label if no actual local file survived capture.
+old_media_body = r'''        let mediaLabel: String
+        if message.mediaPath != nil {
+            mediaLabel = " • Media saved"
+        } else if let mimeType = message.mimeType, !mimeType.isEmpty {
+            mediaLabel = " • \(mimeType)"
+        } else {
+            mediaLabel = ""
+        }
+        let body = message.text.isEmpty ? "(media)\(mediaLabel)" : "\(message.text)\(mediaLabel)"'''
+new_media_body = r'''        let body: String
+        if !message.text.isEmpty {
+            body = message.text
+        } else if let mediaPath = message.mediaPath, FileManager.default.fileExists(atPath: mediaPath) {
+            body = ""
+        } else if let mimeType = message.mimeType, !mimeType.isEmpty {
+            body = "Media unavailable (\(mimeType))"
+        } else {
+            body = "No text preview available"
+        }'''
+if old_media_body in u:
+    u = u.replace(old_media_body, new_media_body, 1)
+elif 'body = "Media unavailable (' not in u:
+    raise SystemExit("History media placeholder source did not match the expected pattern")
+
+
 # The current History source uses .item(id, text), not a .message entry.
 # Preserve that established ItemList model and enrich its displayed text.
 item_match = re.search(r'(?m)^(\s*)entries\.append\(\.item\(message\.fakeID, (.+)\)\)', u)
@@ -1440,7 +1476,7 @@ if bubble_width_count != 1:
 u = u.replace("self.timeLabel.textAlignment = .right", "self.timeLabel.textAlignment = .left", 1)
 u = re.sub(
     r'self\.senderLabel\.text = [^\n]+',
-    'self.senderLabel.text = item.senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "User \\(item.message.fromID)" : item.senderName',
+    'self.senderLabel.text = outgoing ? "You" : (item.senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "User \\(item.message.fromID)" : item.senderName)',
     u,
     count=1,
 )
@@ -1452,6 +1488,56 @@ u = re.sub(
 )
 if bubble_width_line not in u:
     raise SystemExit("Final Telegram-style History bubble width was not retained")
+if 'let body = message.text.isEmpty ? "(media)' in u:
+    raise SystemExit("History must not display the old generic (media) placeholder")
+if 'body = "Media unavailable (' not in u:
+    raise SystemExit("History needs a fallback if the archived media file is missing")
+if "item.displayText.isEmpty && hasMedia ? 0.0" not in u:
+    raise SystemExit("Empty text rows should collapse the body area when media preview is present")
+
+# Keep History ordered like a conversation: oldest at the top, newest at the bottom,
+# then position the initial viewport on the newest captured message.
+descending_loop = "for message in messages.sorted(by: { $0.fakeID > $1.fakeID }) {"
+ascending_loop = "for message in messages.sorted(by: { $0.fakeID < $1.fakeID }) {"
+if descending_loop in u:
+    u = u.replace(descending_loop, ascending_loop, 1)
+elif ascending_loop not in u:
+    raise SystemExit("History message ordering loop not found")
+
+old_list_state = """        let listState = ItemListNodeState(
+            presentationData: ItemListPresentationData(presentationData),
+            entries: ayuHistoryEntries(messages, settings: AyuGramRuntime.settings(accountID: accountID) ?? AyuSettings()),
+            style: .blocks,
+            animateChanges: false
+        )"""
+new_list_state = """        let historyEntries = ayuHistoryEntries(messages, settings: AyuGramRuntime.settings(accountID: accountID) ?? AyuSettings())
+        let initialScrollToItem: ListViewScrollToItem? = {
+            guard !messages.isEmpty, !historyEntries.isEmpty else {
+                return nil
+            }
+            return ListViewScrollToItem(
+                index: historyEntries.count - 1,
+                position: .bottom(0.0),
+                animated: false,
+                curve: .Default(duration: 0.0),
+                directionHint: .Down
+            )
+        }()
+        let listState = ItemListNodeState(
+            presentationData: ItemListPresentationData(presentationData),
+            entries: historyEntries,
+            style: .blocks,
+            initialScrollToItem: initialScrollToItem,
+            animateChanges: false
+        )"""
+if old_list_state in u:
+    u = u.replace(old_list_state, new_list_state, 1)
+elif "initialScrollToItem: initialScrollToItem" not in u:
+    raise SystemExit("Could not add initial scroll-to-latest for History")
+if "position: .bottom(0.0)" not in u or "historyEntries.count - 1" not in u:
+    raise SystemExit("History initial scroll-to-latest contract missing")
+if "let outgoing = item.message.fromID == item.message.userID" not in u or "let bubbleX = outgoing ?" not in u:
+    raise SystemExit("Incoming/outgoing message alignment missing")
 
 ui.write_text(u)
 

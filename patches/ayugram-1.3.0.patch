@@ -387,7 +387,7 @@ new file mode 100644
 +        guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
 +            .appendingPathComponent("Telegram", isDirectory: true)
 +            .appendingPathComponent("AyuGram", isDirectory: true)
-+            .appendingPathComponent("Saved", isDirectory: true) else {
++            .appendingPathComponent("saved", isDirectory: true) else {
 +            return false
 +        }
 +

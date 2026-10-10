@@ -146,12 +146,12 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
             let messageID: Int32 = 1700000001
 
             // Verify the actual user-facing Saved layout:
-            // Documents/Telegram/AyuGram/Saved/Media
-            // Documents/Telegram/AyuGram/Saved/Messages
+            // Documents/Telegram/AyuGram/saved/Media
+            // Documents/Telegram/AyuGram/saved/Messages
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent("saved", isDirectory: true)
             let mediaRoot = savedRoot?.appendingPathComponent("Media", isDirectory: true)
             let messagesRoot = savedRoot?.appendingPathComponent("Messages", isDirectory: true)
 
