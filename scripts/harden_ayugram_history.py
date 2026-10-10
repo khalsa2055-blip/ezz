@@ -250,6 +250,41 @@ context_menu.write_text(context_menu_text)
 if "ayuGramHistoryScreen(context: context, dialogID: message.id.peerId.toInt64())" not in context_menu_text:
     raise SystemExit("Per-dialog History context-menu routing is missing")
 
+
+# Server-delivered deletion updates are replayed through AccountStateManagementUtils,
+# not only the user's local delete button. Pass the account ID there too, otherwise
+# _internal_deleteMessages receives nil and silently skips automatic History capture.
+state_utils = root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift"
+if not state_utils.exists():
+    raise SystemExit(f"Missing Telegram state utility source: {state_utils}")
+state_utils_text = state_utils.read_text()
+old_delete_event = """            case let .DeleteMessages(ids):
+                _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, manualAddMessageThreadStatsDifference: { id, add, remove in
+                    addMessageThreadStatsDifference(threadKey: id, remove: remove, addedMessagePeer: nil, addedMessageId: nil, isOutgoing: false)
+                })
+                deletedMessageIds.append(contentsOf: ids.map { .messageId($0) })"""
+new_delete_event = """            case let .DeleteMessages(ids):
+                _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, manualAddMessageThreadStatsDifference: { id, add, remove in
+                    addMessageThreadStatsDifference(threadKey: id, remove: remove, addedMessagePeer: nil, addedMessageId: nil, isOutgoing: false)
+                }, ayuAccountID: accountPeerId.toInt64())
+                deletedMessageIds.append(contentsOf: ids.map { .messageId($0) })"""
+if old_delete_event in state_utils_text:
+    state_utils_text = state_utils_text.replace(old_delete_event, new_delete_event, 1)
+elif new_delete_event not in state_utils_text:
+    raise SystemExit("Could not wire account ID into server-delivered delete events")
+state_utils.write_text(state_utils_text)
+
+# Guard against regressions in the actual server-update deletion path.
+case_marker = "case let .DeleteMessages(ids):"
+if case_marker not in state_utils_text:
+    raise SystemExit("Server-delivered DeleteMessages event handler not found")
+delete_event_block = state_utils_text.split(case_marker, 1)[1].split("case let .UpdateMinAvailableMessage", 1)[0]
+if "AyuGramCaptureService.captureDeleted" not in state_utils_text:
+    raise SystemExit("Automatic deleted-message capture service is not integrated")
+if "ayuAccountID: accountPeerId.toInt64()" not in delete_event_block:
+    raise SystemExit("Automatic History is not enabled for server-delivered deleted-message updates")
+print("Verified automatic History receives account ID on Telegram's server-delivered DeleteMessages path.")
+
 for required in [
     "AyuGram Save",
     "AyuGram Transfer to Saved Messages",
