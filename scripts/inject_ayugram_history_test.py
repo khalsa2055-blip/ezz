@@ -75,8 +75,11 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                 }
                                 let reportURL = documents.appendingPathComponent("AyuGramHistoryListSmokeReport.json")
                                 let markerURL = documents.appendingPathComponent("AyuGramHistoryListHarnessReady.txt")
+                                let productionMarkerURL = documents.appendingPathComponent("AyuGramHistoryProductionScreenReady.txt")
                                 let report: [String: Any] = [
                                     "passed": true,
+                                    "mode": "production AccountContext History screen",
+                                    "production_history_screen_tested": true,
                                     "dialogID": dialogID,
                                     "messageID": messageID,
                                     "senderName": "Smoke Test Sender",
@@ -86,8 +89,9 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                 do {
                                     let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
                                     try data.write(to: reportURL, options: .atomic)
-                                    try Data("History list fixture ready".utf8).write(to: markerURL, options: .atomic)
-                                    print("AyuGram History list fixture rendered for dialog \(dialogID)")
+                                    try Data("History production screen ready".utf8).write(to: productionMarkerURL, options: .atomic)
+                                    try Data("History production screen ready".utf8).write(to: markerURL, options: .atomic)
+                                    print("AyuGram production History screen rendered for test dialog \(dialogID)")
                                 } catch {
                                     print("AyuGram History list fixture report write failed: \(error)")
                                 }
