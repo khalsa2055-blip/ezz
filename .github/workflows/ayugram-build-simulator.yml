@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/history-production-ui-smoke-no-auto-ipa
     paths:
       - '.github/workflows/ayugram-build-simulator.yml'
       - '.github/history-menu-smoke.py'
