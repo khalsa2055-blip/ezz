@@ -1235,6 +1235,43 @@ elif not (
     raise SystemExit("Postbox History row constructor does not preserve sender/deletion metadata")
 store.write_text(store_text)
 
+# Keep the open History conversation in sync when a new delete/edit is committed.
+# The list initially loads from Postbox, then reloads only for the active account
+# when the durable History store changes.
+store_text = store.read_text()
+notification_decl_old = """public enum AyuGramPostboxHistoryStore {
+    private static let key = ValueBoxKey("ayugram.messageHistory.v1")"""
+notification_decl_new = """public enum AyuGramPostboxHistoryStore {
+    public static let didChangeNotification = Notification.Name("AyuGramHistoryStoreDidChange")
+    private static let key = ValueBoxKey("ayugram.messageHistory.v1")"""
+if notification_decl_old in store_text:
+    store_text = store_text.replace(notification_decl_old, notification_decl_new, 1)
+elif 'public static let didChangeNotification = Notification.Name("AyuGramHistoryStoreDidChange")' not in store_text:
+    raise SystemExit("History change notification declaration anchor missing")
+
+notification_append_old = """        transaction.setPreferencesEntry(key: key, value: PreferencesEntry(state))
+        return stored
+    }
+
+    private static func read(transaction: Transaction) -> AyuPostboxHistoryState {"""
+notification_append_new = """        transaction.setPreferencesEntry(key: key, value: PreferencesEntry(state))
+        if let accountID = snapshots.first?.userID {
+            NotificationCenter.default.post(
+                name: didChangeNotification,
+                object: nil,
+                userInfo: ["accountID": accountID]
+            )
+        }
+        return stored
+    }
+
+    private static func read(transaction: Transaction) -> AyuPostboxHistoryState {"""
+if notification_append_old in store_text:
+    store_text = store_text.replace(notification_append_old, notification_append_new, 1)
+elif "name: didChangeNotification" not in store_text:
+    raise SystemExit("History change notification append anchor missing")
+store.write_text(store_text)
+
 # 2) Snapshot bridge: automatically timestamp deletion events and retain sender name.
 bridge_text = (root / "submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift").read_text()
 if "fromName: String? = nil" not in bridge_text:
@@ -1669,6 +1706,58 @@ if old_history_query in u:
     u = u.replace(old_history_query, new_history_query, 1)
 elif "transaction.getPeer(PeerId(message.fromID))" not in u:
     raise SystemExit("History sender-name lookup query anchor not found")
+
+# Use a real change signal instead of a one-shot Postbox transaction. This keeps
+# the History list itself live: a newly captured message appears without leaving
+# and reopening the screen. The initial event still loads existing persisted rows.
+history_signal_start = """    let signal = combineLatest(
+        context.sharedContext.presentationData,
+        context.account.postbox.transaction { transaction in"""
+history_signal_start_new = """    let historyChanges: Signal<Void, NoError> = Signal { subscriber in
+        let observer = NotificationCenter.default.addObserver(
+            forName: AyuGramPostboxHistoryStore.didChangeNotification,
+            object: nil,
+            queue: nil
+        ) { notification in
+            guard let changedAccountID = notification.userInfo?["accountID"] as? Int64,
+                  changedAccountID == accountID else {
+                return
+            }
+            subscriber.putNext(())
+        }
+        subscriber.putNext(())
+        return ActionDisposable {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+    let signal = combineLatest(
+        context.sharedContext.presentationData,
+        historyChanges
+        |> mapToSignal { _ in
+            context.account.postbox.transaction { transaction in"""
+if history_signal_start in u:
+    u = u.replace(history_signal_start, history_signal_start_new, 1)
+elif "let historyChanges: Signal<Void, NoError> = Signal" not in u:
+    raise SystemExit("History screen Postbox signal anchor not found")
+
+history_signal_end = """            }
+        }
+    )
+    |> deliverOnMainQueue
+    |> map { presentationData, messages -> (ItemListControllerState, (ItemListNodeState, Any)) in"""
+history_signal_end_new = """            }
+        }
+        }
+    )
+    |> deliverOnMainQueue
+    |> map { presentationData, messages -> (ItemListControllerState, (ItemListNodeState, Any)) in"""
+if history_signal_end in u:
+    u = u.replace(history_signal_end, history_signal_end_new, 1)
+elif "historyChanges" not in u:
+    raise SystemExit("Could not close History live-update signal")
+
+if "AyuGramPostboxHistoryStore.didChangeNotification" not in u or "historyChanges" not in u:
+    raise SystemExit("History list is not wired to live Postbox updates")
 
 if "let senderName: String" not in u:
     u = u.replace(
