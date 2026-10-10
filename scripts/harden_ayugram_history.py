@@ -618,6 +618,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
     private let saveButton = UIButton(type: .system)
     private let mediaButton = UIButton(type: .system)
     private var item: AyuHistoryBubbleItem?
+    private var activeMediaThumbnailGenerator: AVAssetImageGenerator?
 
     override init(layerBacked: Bool = false, rotated: Bool = false, seeThrough: Bool = false) {
         super.init(layerBacked: layerBacked, rotated: rotated, seeThrough: seeThrough)
@@ -732,19 +733,49 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
         self.mediaButton.frame = frame
         self.mediaTitleLabel.frame = frame.insetBy(dx: 18.0, dy: 50.0)
 
+        self.activeMediaThumbnailGenerator?.cancelAllCGImageGeneration()
+        self.activeMediaThumbnailGenerator = nil
+
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         let mime = self.item?.message.mimeType?.lowercased() ?? ""
         let isImage = mime.hasPrefix("image/") || ["jpg", "jpeg", "png", "webp", "gif", "heic"].contains(ext)
+        let isVideo = mime.hasPrefix("video/") || ["mp4", "mov", "m4v"].contains(ext)
 
         if isImage, let image = UIImage(contentsOfFile: path) {
             self.mediaView.image = image
             self.mediaView.contentMode = .scaleAspectFill
             self.mediaView.backgroundColor = .clear
             self.mediaTitleLabel.text = nil
+        } else if isVideo {
+            self.mediaView.image = UIImage(systemName: "play.circle.fill")
+            self.mediaView.backgroundColor = UIColor.tertiarySystemBackground
+            self.mediaView.tintColor = UIColor.secondaryLabel
+            self.mediaView.contentMode = .center
+            self.mediaTitleLabel.text = URL(fileURLWithPath: path).lastPathComponent
+            self.mediaTitleLabel.textColor = UIColor.label
+
+            let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 640.0, height: 480.0)
+            self.activeMediaThumbnailGenerator = generator
+            let requestTime = NSValue(time: CMTime(seconds: 0.1, preferredTimescale: 600))
+            generator.generateCGImagesAsynchronously(forTimes: [requestTime]) { [weak self] _, image, _, _, _ in
+                guard let image else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    guard let self, self.item?.message.mediaPath == path else {
+                        return
+                    }
+                    self.mediaView.image = UIImage(cgImage: image)
+                    self.mediaView.contentMode = .scaleAspectFill
+                    self.mediaView.backgroundColor = .clear
+                    self.mediaTitleLabel.text = nil
+                }
+            }
         } else {
-            if mime.hasPrefix("video/") || ["mp4", "mov", "m4v"].contains(ext) {
-                self.mediaView.image = UIImage(systemName: "play.circle.fill")
-            } else if mime.hasPrefix("audio/") || ["mp3", "m4a", "aac", "ogg", "wav"].contains(ext) {
+            if mime.hasPrefix("audio/") || ["mp3", "m4a", "aac", "ogg", "wav"].contains(ext) {
                 self.mediaView.image = UIImage(systemName: "waveform.circle.fill")
             } else {
                 self.mediaView.image = UIImage(systemName: "doc.circle.fill")
@@ -1274,6 +1305,9 @@ if "let bubbleWidth = " not in u or "AyuHistoryBubbleItemNode" not in u:
     u = u[:enum_start] + history_preview_helper + "\n\n" + u[arguments_start:]
     ui.write_text(u)
 
+if "import AVFoundation" not in u:
+    u = u.replace("import UIKit\\n", "import UIKit\\nimport AVFoundation\\n", 1)
+
 if "let senderName: String" not in u:
     u = u.replace(
         "    let displayKind: String\n\n    init(presentationData:",
@@ -1406,7 +1440,7 @@ if bubble_width_count != 1:
 u = u.replace("self.timeLabel.textAlignment = .right", "self.timeLabel.textAlignment = .left", 1)
 u = re.sub(
     r'self\.senderLabel\.text = [^\n]+',
-    'self.senderLabel.text = item.senderName.isEmpty ? "Unknown sender" : item.senderName',
+    'self.senderLabel.text = item.senderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "User \\(item.message.fromID)" : item.senderName',
     u,
     count=1,
 )
@@ -1468,8 +1502,12 @@ if "isCopyProtected()" in save_tail or "containsSecretMedia" in save_tail:
     raise SystemExit("Manual AyuGram Save must not reuse Telegram copy-protection gate")
 if 'let bubbleWidth = min(max(params.width * 0.80' not in u:
     raise SystemExit("Telegram-style narrow message bubble layout missing")
-if 'self.senderLabel.textColor = UIColor { trait in' not in u or 'Unknown sender' not in u:
-    raise SystemExit("Telegram-style sender styling missing")
+if 'self.senderLabel.textColor = UIColor { trait in' not in u or 'User \\(item.message.fromID)' not in u:
+    raise SystemExit("Telegram-style sender styling or fallback missing")
+if 'AVAssetImageGenerator(asset: asset)' not in u or 'generateCGImagesAsynchronously' not in u:
+    raise SystemExit("Video thumbnail preview implementation missing")
+if 'Unknown sender' in u:
+    raise SystemExit("History must not fall back to the vague Unknown sender label")
 if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0' not in u:
     raise SystemExit("History message/deletion timestamps would be clipped")
 
