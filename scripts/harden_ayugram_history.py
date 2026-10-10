@@ -876,7 +876,48 @@ if '.appendingPathComponent("saved", isDirectory: true)' not in archive_text:
 
 # Add a runtime smoke test proving a media copy really reaches the Saved folder.
 smoke_text = smoke.read_text()
+
+# Regression test the production Postbox write path: these fields were present
+# in the capture snapshot but lost when appendDeleted rebuilt the stored row.
+if '"History sender + deletion timestamp round-trip"' not in smoke_text:
+    create_anchor = '            let deleted = AyuMessage(\n'
+    if create_anchor not in smoke_text:
+        raise SystemExit("History metadata smoke-test message constructor not found")
+    smoke_text = smoke_text.replace(
+        create_anchor,
+        '            let deletionTimestamp = Int32(Date().timeIntervalSince1970) - 25\n' + create_anchor,
+        1,
+    )
+    deleted_sender_anchor = '                fromID: accountID,\n                messageID: messageIDBase,\n'
+    if deleted_sender_anchor not in smoke_text:
+        raise SystemExit("History metadata smoke-test sender anchor not found")
+    smoke_text = smoke_text.replace(
+        deleted_sender_anchor,
+        '                fromID: accountID,\n                fromName: "History Smoke Sender",\n                messageID: messageIDBase,\n',
+        1,
+    )
+    deleted_timestamp_anchor = '                isDeleted: true\n            )\n            let edited = AyuMessage('
+    if deleted_timestamp_anchor not in smoke_text:
+        raise SystemExit("History metadata smoke-test deletion timestamp anchor not found")
+    smoke_text = smoke_text.replace(
+        deleted_timestamp_anchor,
+        '                isDeleted: true,\n                deletedAt: deletionTimestamp\n            )\n            let edited = AyuMessage(',
+        1,
+    )
+    old_deleted_assertion = '            let deletedHit = deletedRows.contains { $0.text == deleted.text && $0.isDeleted }'
+    new_deleted_assertion = '            let deletedHit = deletedRows.contains { $0.text == deleted.text && $0.isDeleted && $0.fromName == "History Smoke Sender" && $0.deletedAt == deletionTimestamp }'
+    if old_deleted_assertion not in smoke_text:
+        raise SystemExit("History metadata smoke-test assertion anchor not found")
+    smoke_text = smoke_text.replace(old_deleted_assertion, new_deleted_assertion, 1)
+    smoke_text = smoke_text.replace(
+        '            return (ok, ok ? "deleted, edited and media metadata round-tripped through Postbox" : "history round-trip mismatch")',
+        '            return (ok, ok ? "sender name, exact deletion timestamp, edits and media round-tripped through Postbox" : "history round-trip mismatch (sender/deletion metadata included)")',
+        1,
+    )
+    smoke.write_text(smoke_text)
+
 anchor = '        add("history display labels") {'
+
 if anchor not in smoke_text:
     raise SystemExit("Smoke test saved-copy anchor missing")
 if 'add("History → Saved copy")' not in smoke_text:
