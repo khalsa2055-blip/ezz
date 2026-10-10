@@ -228,7 +228,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
         }
         card.layer.cornerRadius = 17.0
         card.layer.masksToBounds = true
-        card.widthAnchor.constraint(equalTo: messageRow.widthAnchor, multiplier: 0.82).isActive = true
+        // Activate width constraints only after card and row share a view hierarchy.
 
         let sender = UILabel()
         sender.text = "Smoke Test Sender"
@@ -255,6 +255,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
         messageRow.addArrangedSubview(card)
         messageRow.addArrangedSubview(UIView())
         self.contentStack.addArrangedSubview(messageRow)
+        card.widthAnchor.constraint(equalTo: messageRow.widthAnchor, multiplier: 0.82).isActive = true
 
         self.addSubtitle("Synthetic deleted-message fixture. No real Telegram chat session is authenticated in this Simulator.")
         self.writeMarker(self.historyMarkerURL, text: "History list harness with a deleted test entry is visible")
