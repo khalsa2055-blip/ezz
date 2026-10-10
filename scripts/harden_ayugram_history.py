@@ -669,8 +669,8 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
                 attributes: [.font: UIFont.systemFont(ofSize: 16.0)],
                 context: nil
             )
-            let bodyHeight = max(20.0, ceil(bodyRect.height))
             let hasMedia = AyuGramMediaArchive.isArchivedFile(item.message.mediaPath)
+            let bodyHeight = item.displayText.isEmpty && hasMedia ? 0.0 : max(20.0, ceil(bodyRect.height))
             let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
             let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
             let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 24.0 + 8.0
@@ -1396,6 +1396,34 @@ u = u.replace(
 )
 u = u.replace("formatter.dateStyle = .medium", "formatter.dateStyle = .short", 1)
 
+# Media with a valid archived file gets a real image/video preview in the bubble,
+# so don't also render the old literal "(media)" placeholder. Only show a fallback
+# label if no actual local file survived capture.
+old_media_body = r'''        let mediaLabel: String
+        if message.mediaPath != nil {
+            mediaLabel = " • Media saved"
+        } else if let mimeType = message.mimeType, !mimeType.isEmpty {
+            mediaLabel = " • \(mimeType)"
+        } else {
+            mediaLabel = ""
+        }
+        let body = message.text.isEmpty ? "(media)\(mediaLabel)" : "\(message.text)\(mediaLabel)"'''
+new_media_body = r'''        let body: String
+        if !message.text.isEmpty {
+            body = message.text
+        } else if let mediaPath = message.mediaPath, FileManager.default.fileExists(atPath: mediaPath) {
+            body = ""
+        } else if let mimeType = message.mimeType, !mimeType.isEmpty {
+            body = "Media unavailable (\(mimeType))"
+        } else {
+            body = "No text preview available"
+        }'''
+if old_media_body in u:
+    u = u.replace(old_media_body, new_media_body, 1)
+elif 'body = "Media unavailable (' not in u:
+    raise SystemExit("History media placeholder source did not match the expected pattern")
+
+
 # The current History source uses .item(id, text), not a .message entry.
 # Preserve that established ItemList model and enrich its displayed text.
 item_match = re.search(r'(?m)^(\s*)entries\.append\(\.item\(message\.fakeID, (.+)\)\)', u)
@@ -1460,6 +1488,12 @@ u = re.sub(
 )
 if bubble_width_line not in u:
     raise SystemExit("Final Telegram-style History bubble width was not retained")
+if 'let body = message.text.isEmpty ? "(media)' in u:
+    raise SystemExit("History must not display the old generic (media) placeholder")
+if 'body = "Media unavailable (' not in u:
+    raise SystemExit("History needs a fallback if the archived media file is missing")
+if "item.displayText.isEmpty && hasMedia ? 0.0" not in u:
+    raise SystemExit("Empty text rows should collapse the body area when media preview is present")
 
 # Keep History ordered like a conversation: oldest at the top, newest at the bottom,
 # then position the initial viewport on the newest captured message.
