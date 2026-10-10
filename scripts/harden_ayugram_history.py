@@ -680,33 +680,17 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
             )
             return (layout, {
                 self.item = item
-                self.view.backgroundColor = UIColor { trait in
-                    if trait.userInterfaceStyle == .dark {
-                        return UIColor(red: 0.07, green: 0.08, blue: 0.09, alpha: 1.0)
-                    }
-                    return UIColor(red: 0.92, green: 0.94, blue: 0.96, alpha: 1.0)
-                }
-                self.bubbleView.backgroundColor = UIColor { trait in
-                    if outgoing {
-                        if trait.userInterfaceStyle == .dark {
-                            return UIColor(red: 0.13, green: 0.25, blue: 0.34, alpha: 1.0)
-                        }
-                        return UIColor(red: 0.84, green: 0.93, blue: 1.0, alpha: 1.0)
-                    }
-                    if trait.userInterfaceStyle == .dark {
-                        return UIColor(red: 0.14, green: 0.16, blue: 0.18, alpha: 1.0)
-                    }
-                    return UIColor.white
-                }
-                self.senderLabel.textColor = UIColor { trait in
-                    if trait.userInterfaceStyle == .dark {
-                        return UIColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1.0)
-                    }
-                    return UIColor(red: 0.10, green: 0.42, blue: 0.73, alpha: 1.0)
-                }
-                self.kindLabel.textColor = item.message.isDeleted ? UIColor.systemRed : UIColor.systemOrange
-                self.bodyLabel.textColor = UIColor.label
-                self.timeLabel.textColor = UIColor.secondaryLabel
+                // Use Telegram's own theme palette (the same incoming/outgoing
+                // bubble colors used by ChatMessageBubbleItemNode) instead of a
+                // separately invented AyuGram color palette.
+                let theme = item.presentationData.theme
+                let messageTheme = outgoing ? theme.chat.message.outgoing : theme.chat.message.incoming
+                self.view.backgroundColor = theme.list.plainBackgroundColor
+                self.bubbleView.backgroundColor = messageTheme.bubble.withoutWallpaper.fill.first ?? theme.list.plainBackgroundColor
+                self.senderLabel.textColor = messageTheme.accentTextColor
+                self.kindLabel.textColor = item.message.isDeleted ? UIColor.systemRed : messageTheme.accentTextColor
+                self.bodyLabel.textColor = messageTheme.primaryTextColor
+                self.timeLabel.textColor = messageTheme.secondaryTextColor
                 self.senderLabel.text = item.senderName.isEmpty ? "Unknown sender" : item.senderName
                 self.kindLabel.text = item.displayKind
                 self.bodyLabel.text = item.displayText
@@ -1561,7 +1545,9 @@ new_list_state = """        let historyEntries = ayuHistoryEntries(messages, set
         let listState = ItemListNodeState(
             presentationData: ItemListPresentationData(presentationData),
             entries: historyEntries,
-            style: .blocks,
+            // The conversation view should use a continuous plain canvas,
+            // not Telegram's grouped Settings/blocks list background.
+            style: .plain,
             initialScrollToItem: initialScrollToItem,
             animateChanges: false
         )"""
@@ -1571,6 +1557,10 @@ elif "initialScrollToItem: initialScrollToItem" not in u:
     raise SystemExit("Could not add initial scroll-to-latest for History")
 if "position: .bottom(0.0)" not in u or "historyEntries.count - 1" not in u:
     raise SystemExit("History initial scroll-to-latest contract missing")
+if "style: .plain," not in u:
+    raise SystemExit("History conversation must use a plain canvas rather than a Settings blocks list")
+if "theme.chat.message.incoming.bubble" not in history_preview_helper and "messageTheme.bubble.withoutWallpaper.fill.first" not in history_preview_helper:
+    raise SystemExit("History must use Telegram-native chat bubble colors")
 if "let outgoing = item.message.fromID == item.message.userID" not in u or "let bubbleX = outgoing ?" not in u:
     raise SystemExit("Incoming/outgoing message alignment missing")
 
