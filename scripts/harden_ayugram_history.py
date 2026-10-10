@@ -291,11 +291,11 @@ print("Verified automatic History receives account ID on Telegram's server-deliv
 # so capture the existing Postbox messages before the accepted channel update is
 # committed; otherwise the group History list stays empty for the common case.
 if "private func ayuCaptureDeletedChannelMessages(" not in state_utils_text:
-    if "import AyuGramIOS\\n" not in state_utils_text:
-        import_anchor = "import TelegramApi\\n"
+    if "import AyuGramIOS\n" not in state_utils_text:
+        import_anchor = "import TelegramApi\n"
         if import_anchor not in state_utils_text:
             raise SystemExit("AyuGram channel History import anchor not found")
-        state_utils_text = state_utils_text.replace(import_anchor, import_anchor + "import AyuGramIOS\\n", 1)
+        state_utils_text = state_utils_text.replace(import_anchor, import_anchor + "import AyuGramIOS\n", 1)
 
     channel_capture_helper = r'''private func ayuCaptureDeletedChannelMessages(
     transaction: Transaction,
@@ -378,10 +378,10 @@ if channel_fn_start < 0 or channel_fn_end < 0:
     raise SystemExit("Could not locate finalStateWithUpdateGroups channel deletion path")
 channel_fn = state_utils_text[channel_fn_start:channel_fn_end]
 if "var ayuDeletedChannelMessageIds: [MessageId] = []" not in channel_fn:
-    state_anchor = "    var updatedState = state\\n"
+    state_anchor = "    var updatedState = state\n"
     if state_anchor not in channel_fn:
         raise SystemExit("Channel History state anchor not found")
-    channel_fn = channel_fn.replace(state_anchor, state_anchor + "    var ayuDeletedChannelMessageIds: [MessageId] = []\\n", 1)
+    channel_fn = channel_fn.replace(state_anchor, state_anchor + "    var ayuDeletedChannelMessageIds: [MessageId] = []\n", 1)
 
 old_channel_delete = """updatedState.deleteMessages(messages.map({ MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) }))
                         updatedState.updateChannelState(peerId, pts: pts)"""
