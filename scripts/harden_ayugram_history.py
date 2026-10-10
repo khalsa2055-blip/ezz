@@ -1306,7 +1306,7 @@ if "let bubbleWidth = " not in u or "AyuHistoryBubbleItemNode" not in u:
     ui.write_text(u)
 
 if "import AVFoundation" not in u:
-    u = u.replace("import UIKit\\n", "import UIKit\\nimport AVFoundation\\n", 1)
+    u = u.replace("import UIKit\n", "import UIKit\nimport AVFoundation\n", 1)
 
 if "let senderName: String" not in u:
     u = u.replace(
