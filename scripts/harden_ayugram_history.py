@@ -286,6 +286,149 @@ if "ayuAccountID: accountPeerId.toInt64()" not in delete_event_block:
     raise SystemExit("Automatic History is not enabled for server-delivered deleted-message updates")
 print("Verified automatic History receives account ID on Telegram's server-delivered DeleteMessages path.")
 
+# Megagroups/channels use updateDeleteChannelMessages rather than the generic
+# DeleteMessages event. Those updates bypass _internal_deleteMessages entirely,
+# so capture the existing Postbox messages before the accepted channel update is
+# committed; otherwise the group History list stays empty for the common case.
+if "private func ayuCaptureDeletedChannelMessages(" not in state_utils_text:
+    if "import AyuGramIOS\\n" not in state_utils_text:
+        import_anchor = "import TelegramApi\\n"
+        if import_anchor not in state_utils_text:
+            raise SystemExit("AyuGram channel History import anchor not found")
+        state_utils_text = state_utils_text.replace(import_anchor, import_anchor + "import AyuGramIOS\\n", 1)
+
+    channel_capture_helper = r'''private func ayuCaptureDeletedChannelMessages(
+    transaction: Transaction,
+    mediaBox: MediaBox,
+    ids: [MessageId],
+    accountID: Int64
+) {
+    let messages = ids.compactMap { transaction.getMessage($0) }
+    guard !messages.isEmpty else {
+        return
+    }
+
+    var mediaCaptures: [AyuMessageMediaCapture] = []
+    var senderNames: [Int32: String] = [:]
+    for message in messages {
+        if let author = message.author {
+            let name: String?
+            if let user = author as? TelegramUser {
+                let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+                name = parts.isEmpty ? nil : parts.joined(separator: " ")
+            } else if let channel = author as? TelegramChannel {
+                name = channel.title
+            } else if let group = author as? TelegramGroup {
+                name = group.title
+            } else {
+                name = nil
+            }
+            if let name, !name.isEmpty {
+                senderNames[message.id.id] = name
+            }
+        }
+
+        // Retain the text row even for protected media, but don't copy media
+        // that Telegram marks as protected/secret.
+        guard !message.isCopyProtected(), !message.containsSecretMedia else {
+            continue
+        }
+        var resources: [AyuMediaResourceInfo] = []
+        for media in message.effectiveMedia {
+            if let image = media as? TelegramMediaImage,
+               let representation = image.representations.max(by: {
+                   Int64($0.dimensions.width) * Int64($0.dimensions.height)
+                       < Int64($1.dimensions.width) * Int64($1.dimensions.height)
+               }) {
+                resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
+            } else if let file = media as? TelegramMediaFile {
+                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
+            }
+        }
+        var seenResources = Set<String>()
+        resources = resources.filter { seenResources.insert($0.id).inserted }
+        if !resources.isEmpty {
+            mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))
+        }
+    }
+
+    AyuGramCaptureService.captureDeleted(
+        transaction: transaction,
+        mediaBox: mediaBox,
+        messages: messages,
+        mediaCaptures: mediaCaptures,
+        accountID: accountID,
+        senderNames: senderNames
+    )
+}
+
+'''
+    helper_anchor = "func initialStateWithUpdateGroups(postbox: Postbox, groups: [UpdateGroup]) -> Signal<AccountMutableState, NoError> {"
+    if helper_anchor not in state_utils_text:
+        raise SystemExit("Channel History helper insertion anchor not found")
+    state_utils_text = state_utils_text.replace(helper_anchor, channel_capture_helper + helper_anchor, 1)
+
+# Capture only channel deletion updates that pass the same pts continuity check
+# that authorizes their actual removal. The separate Postbox transaction finishes
+# before finalStateWithUpdates commits the deletion.
+channel_fn_anchor = "func finalStateWithUpdateGroups("
+channel_fn_start = state_utils_text.find(channel_fn_anchor)
+channel_fn_end = state_utils_text.find("func finalStateWithDifference(", channel_fn_start)
+if channel_fn_start < 0 or channel_fn_end < 0:
+    raise SystemExit("Could not locate finalStateWithUpdateGroups channel deletion path")
+channel_fn = state_utils_text[channel_fn_start:channel_fn_end]
+if "var ayuDeletedChannelMessageIds: [MessageId] = []" not in channel_fn:
+    state_anchor = "    var updatedState = state\\n"
+    if state_anchor not in channel_fn:
+        raise SystemExit("Channel History state anchor not found")
+    channel_fn = channel_fn.replace(state_anchor, state_anchor + "    var ayuDeletedChannelMessageIds: [MessageId] = []\\n", 1)
+
+old_channel_delete = """updatedState.deleteMessages(messages.map({ MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) }))
+                        updatedState.updateChannelState(peerId, pts: pts)"""
+new_channel_delete = """let ayuDeletedIds = messages.map({ MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) })
+                        ayuDeletedChannelMessageIds.append(contentsOf: ayuDeletedIds)
+                        updatedState.deleteMessages(ayuDeletedIds)
+                        updatedState.updateChannelState(peerId, pts: pts)"""
+if old_channel_delete in channel_fn:
+    channel_fn = channel_fn.replace(old_channel_delete, new_channel_delete, 1)
+elif "ayuDeletedChannelMessageIds.append(contentsOf: ayuDeletedIds)" not in channel_fn:
+    raise SystemExit("Channel History accepted-delete anchor not found")
+
+old_channel_return = """return finalStateWithUpdates(accountPeerId: accountPeerId, postbox: postbox, network: network, state: updatedState, updates: collectedUpdates, shouldPoll: hadReset, missingUpdates: !ptsUpdatesAfterHole.isEmpty || !qtsUpdatesAfterHole.isEmpty || !seqGroupsAfterHole.isEmpty, shouldResetChannels: false, updatesDate: updatesDate, asyncResetChannels: asyncResetChannels)"""
+new_channel_return = """let ayuFinalUpdatedState = updatedState
+    let ayuFinalCollectedUpdates = collectedUpdates
+    let ayuFinalShouldPoll = hadReset
+    let ayuFinalMissingUpdates = !ptsUpdatesAfterHole.isEmpty || !qtsUpdatesAfterHole.isEmpty || !seqGroupsAfterHole.isEmpty
+    let ayuFinalUpdatesDate = updatesDate
+    let finishFinalState: () -> Signal<AccountFinalState, NoError> = {
+        return finalStateWithUpdates(accountPeerId: accountPeerId, postbox: postbox, network: network, state: ayuFinalUpdatedState, updates: ayuFinalCollectedUpdates, shouldPoll: ayuFinalShouldPoll, missingUpdates: ayuFinalMissingUpdates, shouldResetChannels: false, updatesDate: ayuFinalUpdatesDate, asyncResetChannels: asyncResetChannels)
+    }
+    var seenAyuDeletedIds = Set<MessageId>()
+    let uniqueAyuDeletedIds = ayuDeletedChannelMessageIds.filter { seenAyuDeletedIds.insert($0).inserted }
+    guard !uniqueAyuDeletedIds.isEmpty else {
+        return finishFinalState()
+    }
+    return postbox.transaction { transaction -> Void in
+        ayuCaptureDeletedChannelMessages(
+            transaction: transaction,
+            mediaBox: postbox.mediaBox,
+            ids: uniqueAyuDeletedIds,
+            accountID: accountPeerId.toInt64()
+        )
+    }
+    |> mapToSignal { _ in
+        return finishFinalState()
+    }"""
+if old_channel_return in channel_fn:
+    channel_fn = channel_fn.replace(old_channel_return,new_channel_return,1)
+elif "finishFinalState: () -> Signal<AccountFinalState, NoError>" not in channel_fn:
+    raise SystemExit("Channel History pre-delete capture return anchor not found")
+state_utils_text = state_utils_text[:channel_fn_start] + channel_fn + state_utils_text[channel_fn_end:]
+
+if "AyuGramCaptureService.captureDeleted(" not in state_utils_text or "ayuDeletedChannelMessageIds.append(contentsOf: ayuDeletedIds)" not in state_utils_text:
+    raise SystemExit("Channel-group History capture integration is incomplete")
+state_utils.write_text(state_utils_text)
+
 for required in [
     "AyuGram Save",
     "AyuGram Transfer to Saved Messages",
