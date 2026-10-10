@@ -879,7 +879,7 @@ smoke_text = smoke.read_text()
 
 # Regression test the production Postbox write path: these fields were present
 # in the capture snapshot but lost when appendDeleted rebuilt the stored row.
-if '"History sender + deletion timestamp round-trip"' not in smoke_text:
+if 'fromName: "History Smoke Sender"' not in smoke_text:
     create_anchor = '            let deleted = AyuMessage(\n'
     if create_anchor not in smoke_text:
         raise SystemExit("History metadata smoke-test message constructor not found")
