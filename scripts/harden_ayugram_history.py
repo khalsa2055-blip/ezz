@@ -366,7 +366,7 @@ test += '''        add("History → Saved media set") {
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent("saved", isDirectory: true)
                 .appendingPathComponent("Media", isDirectory: true)
             let firstSaved = savedRoot?.appendingPathComponent("message-\\(messageID)-media-1.jpg")
             let secondSaved = savedRoot?.appendingPathComponent("message-\\(messageID)-media-2.mp4")
@@ -376,7 +376,7 @@ test += '''        add("History → Saved media set") {
             if let cleanup = savedRoot?.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() {
                 try? FileManager.default.removeItem(at: cleanup)
             }
-            return (ok, ok ? "all archived media files copied to Saved/media" : "Saved media set copy failed")
+            return (ok, ok ? "all archived media files copied to saved/media" : "Saved media set copy failed")
         }
         add("History → Saved copy") {
             let dialogID = Int64(9_800_000) + abs(accountID % 100_000)
@@ -402,13 +402,13 @@ test += '''        add("History → Saved media set") {
             let savedRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("Telegram", isDirectory: true)
                 .appendingPathComponent("AyuGram", isDirectory: true)
-                .appendingPathComponent("Saved", isDirectory: true)
+                .appendingPathComponent("saved", isDirectory: true)
             let savedMedia = savedRoot?.appendingPathComponent("Media").appendingPathComponent("message-\\(messageID)-media.jpg")
             let savedMetadata = savedRoot?.appendingPathComponent("Messages").appendingPathComponent("message-\\(messageID).json")
             let ok = saved
                 && (savedMedia.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (savedMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-            return (ok, ok ? "media and metadata copied to Documents/AyuGram/Saved" : "Saved copy failed")
+            return (ok, ok ? "media and metadata copied to Documents/AyuGram/saved" : "Saved copy failed")
         }
 
 '''
@@ -426,7 +426,7 @@ save_api = '''    public static func saveToSaved(message: AyuMessage) -> Bool {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Telegram", isDirectory: true)
             .appendingPathComponent("AyuGram", isDirectory: true)
-            .appendingPathComponent("Saved", isDirectory: true)
+            .appendingPathComponent("saved", isDirectory: true)
         guard let root else { return false }
 
         let mediaRoot = root.appendingPathComponent("Media", isDirectory: true)
@@ -887,8 +887,8 @@ if "public static func saveToSaved(message: AyuMessage) -> Bool" not in archive_
     raise SystemExit("Saved action implementation missing")
 if "AyuGramMediaArchive.saveToSaved(message: message)" not in ui_text and "AyuGramMediaArchive.saveToSaved(message: item.message)" not in ui_text:
     raise SystemExit("History Save action wiring missing")
-if '.appendingPathComponent("Saved", isDirectory: true)' not in archive_text:
-    raise SystemExit("Saved folder path missing")
+if '.appendingPathComponent("saved", isDirectory: true)' not in archive_text:
+    raise SystemExit("saved folder path missing")
 
 # Add a runtime smoke test proving a media copy really reaches the Saved folder.
 smoke_text = smoke.read_text()
