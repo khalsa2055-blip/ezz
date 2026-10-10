@@ -1376,6 +1376,76 @@ if "let bubbleWidth = " not in u or "AyuHistoryBubbleItemNode" not in u:
 if "import AVFoundation" not in u:
     u = u.replace("import UIKit\n", "import UIKit\nimport AVFoundation\n", 1)
 
+# Backfill names for older History rows created before senderName was persisted.
+# Telegram's Postbox still has the peer cache in many cases, so resolve the sender
+# by the encoded PeerId rather than showing an anonymous placeholder.
+if "import TelegramCore" not in u:
+    u = u.replace("import Postbox\n", "import Postbox\nimport TelegramCore\n", 1)
+
+old_history_query = """        context.account.postbox.transaction { transaction in
+            AyuGramPostboxHistoryStore.filtered(
+                transaction: transaction,
+                userID: accountID,
+                dialogID: dialogID,
+                kind: .all,
+                limit: 500
+            )
+        }"""
+new_history_query = """        context.account.postbox.transaction { transaction in
+            let rows = AyuGramPostboxHistoryStore.filtered(
+                transaction: transaction,
+                userID: accountID,
+                dialogID: dialogID,
+                kind: .all,
+                limit: 500
+            )
+            return rows.map { message in
+                if let savedName = message.fromName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !savedName.isEmpty {
+                    return message
+                }
+                guard message.fromID != 0,
+                      let author = transaction.getPeer(PeerId(message.fromID)) else {
+                    return message
+                }
+                let resolvedName: String?
+                if let user = author as? TelegramUser {
+                    let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+                    resolvedName = parts.isEmpty ? nil : parts.joined(separator: " ")
+                } else if let channel = author as? TelegramChannel {
+                    resolvedName = channel.title
+                } else if let group = author as? TelegramGroup {
+                    resolvedName = group.title
+                } else {
+                    resolvedName = nil
+                }
+                guard let resolvedName, !resolvedName.isEmpty else {
+                    return message
+                }
+                return AyuMessage(
+                    fakeID: message.fakeID,
+                    userID: message.userID,
+                    dialogID: message.dialogID,
+                    peerID: message.peerID,
+                    fromID: message.fromID,
+                    fromName: resolvedName,
+                    topicID: message.topicID,
+                    messageID: message.messageID,
+                    date: message.date,
+                    editDate: message.editDate,
+                    text: message.text,
+                    mediaPath: message.mediaPath,
+                    mimeType: message.mimeType,
+                    isDeleted: message.isDeleted,
+                    deletedAt: message.deletedAt
+                )
+            }
+        }"""
+if old_history_query in u:
+    u = u.replace(old_history_query, new_history_query, 1)
+elif "transaction.getPeer(PeerId(message.fromID))" not in u:
+    raise SystemExit("History sender-name lookup query anchor not found")
+
 if "let senderName: String" not in u:
     u = u.replace(
         "    let displayKind: String\n\n    init(presentationData:",
@@ -1670,6 +1740,8 @@ if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0
 
 if 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
+if "transaction.getPeer(PeerId(message.fromID))" not in u:
+    raise SystemExit("History must resolve missing sender names from Telegram's Postbox peer cache")
 
 # Automatic History must archive media privately and persist message/text history in Postbox.
 # It must never write text into the visible Saved files unless the user explicitly taps Save.
