@@ -2070,7 +2070,7 @@ if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0
 if "self.timeLabel.numberOfLines = 2" not in u:
     raise SystemExit("History list must show sent and deleted timestamps on two lines")
 
-if 'Deleted \\($0)' not in u:
+if 'Deleted: \\($0)' not in u and 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
 if "transaction.getPeer(PeerId(message.fromID))" not in u:
     raise SystemExit("History must resolve missing sender names from Telegram's Postbox peer cache")
