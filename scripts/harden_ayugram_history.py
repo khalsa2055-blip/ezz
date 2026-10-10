@@ -393,24 +393,61 @@ new_return = r'''    return network.currentGlobalTime
             channelPts[peerId] = channelState.pts
         }
         var deletedChannelMessageIds: [MessageId] = []
-        for update in sortedUpdates(updates) {
-            guard case let .updateDeleteChannelMessages(data) = update else {
-                continue
-            }
-            let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(data.channelId))
+        func advanceChannelPts(_ peerId: PeerId, pts: Int32, ptsCount: Int32) -> Bool {
             guard let previousPts = channelPts[peerId] else {
-                continue
+                return false
             }
-            if previousPts >= data.pts {
-                continue
+            if previousPts >= pts {
+                return false
             }
-            guard previousPts + data.ptsCount == data.pts else {
-                continue
+            guard previousPts + ptsCount == pts else {
+                return false
             }
-            deletedChannelMessageIds.append(contentsOf: data.messages.map {
-                MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0)
-            })
-            channelPts[peerId] = data.pts
+            channelPts[peerId] = pts
+            return true
+        }
+
+        // Match Telegram's channel pts progression, not just deletion updates.
+        // A new/edit/web-page/pinned update can advance pts earlier in the same batch;
+        // ignoring it makes the following valid delete look like a pts hole and loses
+        // History rows for otherwise accepted deletions.
+        for update in sortedUpdates(updates) {
+            switch update {
+            case let .updateDeleteChannelMessages(data):
+                let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(data.channelId))
+                if advanceChannelPts(peerId, pts: data.pts, ptsCount: data.ptsCount) {
+                    deletedChannelMessageIds.append(contentsOf: data.messages.map {
+                        MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0)
+                    })
+                }
+            case let .updateEditChannelMessage(data):
+                let apiMessage = data.message
+                var peerIsForum = false
+                if let peerId = apiMessage.peerId {
+                    peerIsForum = state.isPeerForum(peerId: peerId)
+                }
+                if let message = StoreMessage(apiMessage: apiMessage, accountPeerId: accountPeerId, peerIsForum: peerIsForum),
+                   case let .Id(messageId) = message.id {
+                    _ = advanceChannelPts(messageId.peerId, pts: data.pts, ptsCount: data.ptsCount)
+                }
+            case let .updateNewChannelMessage(data):
+                let apiMessage = data.message
+                var peerIsForum = false
+                if let peerId = apiMessage.peerId {
+                    peerIsForum = state.isPeerForum(peerId: peerId)
+                }
+                if let message = StoreMessage(apiMessage: apiMessage, accountPeerId: accountPeerId, peerIsForum: peerIsForum) {
+                    _ = advanceChannelPts(message.id.peerId, pts: data.pts, ptsCount: data.ptsCount)
+                }
+            case let .updateChannelWebPage(data):
+                let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(data.channelId))
+                _ = advanceChannelPts(peerId, pts: data.pts, ptsCount: data.ptsCount)
+            case let .updatePinnedChannelMessages(data):
+                let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(data.channelId))
+                _ = advanceChannelPts(peerId, pts: data.pts, ptsCount: data.ptsCount)
+            default:
+                break
+            }
         }
 
         let finishState: () -> Signal<AccountFinalState, NoError> = {
@@ -439,6 +476,18 @@ if count != 1:
 state_utils_text = state_utils_text[:outer_start] + updated_outer_fn + state_utils_text[outer_end:]
 if "ayuCaptureDeletedChannelMessages(" not in state_utils_text or "let acceptedIds = deletedChannelMessageIds.filter" not in state_utils_text:
     raise SystemExit("Channel-group History pre-delete capture integration is incomplete")
+# Regression guard: the capture simulation must account for all channel update
+# types that advance pts before a deletion in the same update batch.
+for required_pts_update in [
+    "func advanceChannelPts",
+    "case let .updateDeleteChannelMessages(data)",
+    "case let .updateEditChannelMessage(data)",
+    "case let .updateNewChannelMessage(data)",
+    "case let .updateChannelWebPage(data)",
+    "case let .updatePinnedChannelMessages(data)",
+]:
+    if required_pts_update not in updated_outer_fn:
+        raise SystemExit(f"Channel History pts simulation missing {required_pts_update}")
 state_utils.write_text(state_utils_text)
 
 # Keep the patch script's acceptance check aligned with the true Telegram baseline.
