@@ -279,7 +279,8 @@ case_marker = "case let .DeleteMessages(ids):"
 if case_marker not in state_utils_text:
     raise SystemExit("Server-delivered DeleteMessages event handler not found")
 delete_event_block = state_utils_text.split(case_marker, 1)[1].split("case let .UpdateMinAvailableMessage", 1)[0]
-if "AyuGramCaptureService.captureDeleted" not in state_utils_text:
+delete_source = root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift"
+if not delete_source.exists() or "AyuGramCaptureService.captureDeleted(" not in delete_source.read_text():
     raise SystemExit("Automatic deleted-message capture service is not integrated")
 if "ayuAccountID: accountPeerId.toInt64()" not in delete_event_block:
     raise SystemExit("Automatic History is not enabled for server-delivered deleted-message updates")
