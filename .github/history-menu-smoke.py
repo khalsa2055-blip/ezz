@@ -257,7 +257,7 @@ private final class AyuGramHistoryHarnessController: UIViewController {
         self.contentStack.addArrangedSubview(messageRow)
         card.widthAnchor.constraint(equalTo: messageRow.widthAnchor, multiplier: 0.82).isActive = true
 
-        self.addSubtitle("Synthetic deleted-message fixture. No real Telegram chat session is authenticated in this Simulator.")
+        self.addSubtitle("Visual fixture only • no signed-in chat; this is not the production History screen.")
         self.writeMarker(self.historyMarkerURL, text: "History list harness with a deleted test entry is visible")
         self.writeReport(menuVisible: false, historyVisible: true)
     }
@@ -274,10 +274,11 @@ private final class AyuGramHistoryHarnessController: UIViewController {
 
     private func writeReport(menuVisible: Bool, historyVisible: Bool) {
         let report: [String: Any] = [
-            "mode": "unauthenticated Simulator visual fixture",
-            "menu_screen_rendered": menuVisible,
-            "history_screen_rendered": historyVisible,
-            "deleted_message_entry_rendered": historyVisible,
+            "mode": "unauthenticated Simulator visual fixture (not production History UI)",
+            "menu_fixture_rendered": menuVisible,
+            "visual_fixture_rendered": historyVisible,
+            "synthetic_deleted_message_row_rendered": historyVisible,
+            "production_history_screen_tested": false,
             "production_group_menu_route_is_source_checked": true,
             "passed": historyVisible
         ]

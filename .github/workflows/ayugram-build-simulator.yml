@@ -523,7 +523,11 @@ jobs:
               fputs("History screenshot is neither the actual deleted-message list nor the intended fallback fixture.\n", stderr)
               exit(1)
           }
-          print("History screenshot visually verified; group-menu route checked separately in source.")
+          if actualHistoryScreen {
+              print("Production AyuGram History screen text detected.")
+          } else {
+              print("WARNING: This screenshot is the explicitly labeled unauthenticated visual fixture, not the production History screen.")
+          }
           SWIFT
           swift ci-artifacts/smoke/verify-history-screenshots.swift
           if [ -z "$report" ] || [ ! -f "$report" ]; then
@@ -537,11 +541,16 @@ jobs:
 
           report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           print(json.dumps(report, ensure_ascii=False, indent=2))
-          assert report.get("history_screen_rendered") is True, report
-          assert report.get("deleted_message_entry_rendered") is True, report
-          assert report.get("deleted_message_entry_rendered") is True, report
           assert report.get("passed") is True, report
-          print("History UI harness passed: More menu and deleted-entry screen rendered.")
+          mode = str(report.get("mode", ""))
+          if "visual fixture" in mode.lower():
+              assert report.get("visual_fixture_rendered") is True, report
+              assert report.get("production_history_screen_tested") is False, report
+              print("Unauthenticated History layout fixture passed. Production History runtime behavior was NOT tested in this Simulator run.")
+          else:
+              assert report.get("senderName") == "Smoke Test Sender", report
+              assert report.get("dialogID") is not None, report
+              print("Production History hook reported a rendered per-dialog entry.")
           PY
 
           # Check only for recent Telegram-process crash/fatal messages; do not treat
@@ -552,7 +561,7 @@ jobs:
             exit 1
           fi
 
-          echo "Simulator comprehensive AyuGram smoke test passed: installed, tested, launched, and screenshot captured for $bundle_id."
+          echo "Simulator build and runtime save smoke checks passed for $bundle_id. See the History report above to distinguish the visual fixture from a production-screen test."
           xcrun simctl terminate "$DEVICE_UDID" "$bundle_id" || true
 
       - name: Collect simulator artifacts
