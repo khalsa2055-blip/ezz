@@ -1729,8 +1729,8 @@ if "isCopyProtected()" in save_tail or "containsSecretMedia" in save_tail:
     raise SystemExit("Manual AyuGram Save must not reuse Telegram copy-protection gate")
 if 'let bubbleWidth = min(max(params.width * 0.80' not in u:
     raise SystemExit("Telegram-style narrow message bubble layout missing")
-if 'self.senderLabel.textColor = UIColor { trait in' not in u or 'User \\(item.message.fromID)' not in u:
-    raise SystemExit("Telegram-style sender styling or fallback missing")
+if 'self.senderLabel.textColor = messageTheme.accentTextColor' not in u or 'User \\(item.message.fromID)' not in u:
+    raise SystemExit("Telegram-native sender styling or fallback missing")
 if 'AVAssetImageGenerator(asset: asset)' not in u or 'generateCGImagesAsynchronously' not in u:
     raise SystemExit("Video thumbnail preview implementation missing")
 if 'Unknown sender' in u:
