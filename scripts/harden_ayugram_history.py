@@ -777,7 +777,19 @@ private final class AyuHistoryBubbleItem: ListViewItem {
     }
 
     var approximateHeight: CGFloat {
-        return self.message.mediaPath == nil ? 92.0 : 230.0
+        let hasMedia = AyuGramMediaArchive.isArchivedFile(self.message.mediaPath)
+        let estimateRect = (self.displayText as NSString).boundingRect(
+            with: CGSize(width: 180.0, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: UIFont.systemFont(ofSize: 16.0)],
+            context: nil
+        )
+        let bodyHeight = self.displayText.isEmpty && hasMedia ? 0.0 : max(20.0, ceil(estimateRect.height))
+        let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
+        let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
+        // Keep ListView's estimate close to the real node layout, including the
+        // two-line Sent/Deleted timestamp footer, so rows aren't clipped or jumped.
+        return 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 36.0 + 8.0
     }
 
     func nodeConfiguredForParams(
@@ -1938,6 +1950,10 @@ if 'body = "Media unavailable (' not in u:
     raise SystemExit("History needs a fallback if the archived media file is missing")
 if "item.displayText.isEmpty && hasMedia ? 0.0" not in u:
     raise SystemExit("Empty text rows should collapse the body area when media preview is present")
+if "let estimateRect = (self.displayText as NSString).boundingRect(" not in u:
+    raise SystemExit("History row height estimate is not based on each message's text")
+if "self.timeLabel.numberOfLines = 2" not in u or "+ 36.0 + 8.0" not in u:
+    raise SystemExit("History row height must account for sent/deleted timestamp footer")
 
 # Keep History ordered like a conversation: oldest at the top, newest at the bottom,
 # then position the initial viewport on the newest captured message.
