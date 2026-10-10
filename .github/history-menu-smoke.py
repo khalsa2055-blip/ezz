@@ -299,8 +299,13 @@ if "AyuGramHistoryHarnessController(), on: .root" not in s:
                 guard let self else {
                     return
                 }
-                guard let scene = self.nativeWindow?.windowScene else {
-                    print("AyuGram History smoke harness could not find the app window scene")
+                let availableScenes = UIApplication.shared.connectedScenes
+                    .compactMap { $0 as? UIWindowScene }
+                let scene = self.nativeWindow?.windowScene
+                    ?? availableScenes.first(where: { $0.activationState == .foregroundActive })
+                    ?? availableScenes.first
+                guard let scene else {
+                    print("AyuGram History smoke harness could not find an active app window scene")
                     return
                 }
                 let overlay = UIWindow(windowScene: scene)
