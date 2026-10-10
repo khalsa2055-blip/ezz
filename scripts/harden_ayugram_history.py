@@ -1887,7 +1887,7 @@ else:
         indent = entry_match.group(1)
         replacement = (
             indent + 'let sender = message.fromName ?? ""\n'
-            + indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
+            + indent + 'let meta = deletionDate.map { "Sent: \\(date)\\nDeleted: \\($0)" } ?? date\n'
             + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
         )
         u = u[:entry_match.start()] + replacement + u[entry_match.end():]
