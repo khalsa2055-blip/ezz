@@ -960,6 +960,41 @@ message_text = message_text.replace(
 )
 message.write_text(message_text)
 
+# 1b) Preserve the sender/deletion metadata when snapshots become durable Postbox rows.
+# This is the production storage boundary used by the History screen; adding the fields
+# to AyuMessage alone is not enough because the old constructor silently dropped them.
+store_text = store.read_text()
+old_store_row = """                fromID: snapshot.fromID,
+                topicID: snapshot.topicID,
+                messageID: snapshot.messageID,
+                date: snapshot.date,
+                editDate: snapshot.editDate,
+                text: snapshot.text,
+                mediaPath: snapshot.mediaPath,
+                mimeType: snapshot.mimeType,
+                isDeleted: deleted
+"""
+new_store_row = """                fromID: snapshot.fromID,
+                fromName: snapshot.fromName,
+                topicID: snapshot.topicID,
+                messageID: snapshot.messageID,
+                date: snapshot.date,
+                editDate: snapshot.editDate,
+                text: snapshot.text,
+                mediaPath: snapshot.mediaPath,
+                mimeType: snapshot.mimeType,
+                isDeleted: deleted,
+                deletedAt: snapshot.deletedAt ?? (deleted ? Int32(Date().timeIntervalSince1970) : nil)
+"""
+if old_store_row in store_text:
+    store_text = store_text.replace(old_store_row, new_store_row, 1)
+elif not (
+    "fromName: snapshot.fromName," in store_text
+    and "deletedAt: snapshot.deletedAt ?? (deleted ? Int32(Date().timeIntervalSince1970) : nil)" in store_text
+):
+    raise SystemExit("Postbox History row constructor does not preserve sender/deletion metadata")
+store.write_text(store_text)
+
 # 2) Snapshot bridge: automatically timestamp deletion events and retain sender name.
 bridge_text = (root / "submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift").read_text()
 if "fromName: String? = nil" not in bridge_text:
@@ -1581,6 +1616,11 @@ if "public let fromName: String?" not in message_text or "public let deletedAt: 
     raise SystemExit("History sender/deletion metadata model missing")
 if "senderNames: [Int32: String]" not in capture.read_text():
     raise SystemExit("Deleted capture sender-name contract missing")
+store_validation = store.read_text()
+if "fromName: snapshot.fromName," not in store_validation:
+    raise SystemExit("Production Postbox History storage drops the sender name")
+if "deletedAt: snapshot.deletedAt ?? (deleted ? Int32(Date().timeIntervalSince1970) : nil)" not in store_validation:
+    raise SystemExit("Production Postbox History storage drops the actual deletion time")
 if context_menu_text.count("AyuGram Save") != 1:
     raise SystemExit("Manual AyuGram Save action must exist exactly once")
 save_tail = context_menu_text.split("AyuGram Save", 1)[1].split("})))", 1)[0]
