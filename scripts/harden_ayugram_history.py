@@ -336,12 +336,17 @@ if "private func ayuCaptureDeletedChannelMessages(" not in state_utils_text:
         }
         var resources: [AyuMediaResourceInfo] = []
         for media in message.effectiveMedia {
-            if let image = media as? TelegramMediaImage,
-               let representation = image.representations.max(by: {
-                   Int64($0.dimensions.width) * Int64($0.dimensions.height)
-                       < Int64($1.dimensions.width) * Int64($1.dimensions.height)
-               }) {
-                resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
+            if let image = media as? TelegramMediaImage {
+                let completedRepresentations = image.representations.filter {
+                    mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: "jpg") != nil
+                }
+                let candidates = completedRepresentations.isEmpty ? image.representations : completedRepresentations
+                if let representation = candidates.max(by: {
+                    Int64($0.dimensions.width) * Int64($0.dimensions.height)
+                        < Int64($1.dimensions.width) * Int64($1.dimensions.height)
+                }) {
+                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
+                }
             } else if let file = media as? TelegramMediaFile {
                 resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
             }
@@ -1275,15 +1280,15 @@ delete_paths = [
     root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift",
     root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift",
 ]
-# Automatic History media: capture one largest photo representation per image,
-# while retaining videos/files as individual resources. This avoids storing
-# thumbnails and alternate photo sizes redundantly.
+# Automatic History media: prefer the largest photo rendition already complete
+# in MediaBox, falling back to the largest known rendition only if none is complete.
+# This preserves thumbnails/previews when the full-size file was never downloaded.
 automatic_media_old = "                if let image = media as? TelegramMediaImage {\n                    for representation in image.representations.sorted(by: {\n                        Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                            > Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                    }) {\n                        resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                    }\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
-automatic_media_new = "                if let image = media as? TelegramMediaImage,\n                   let representation = image.representations.max(by: {\n                       Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                           < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                   }) {\n                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
+automatic_media_new = "                if let image = media as? TelegramMediaImage {\n                    let completedRepresentations = image.representations.filter {\n                        mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: \"jpg\") != nil\n                    }\n                    let candidates = completedRepresentations.isEmpty ? image.representations : completedRepresentations\n                    if let representation = candidates.max(by: {\n                        Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                            < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                    }) {\n                        resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                    }\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
 
 # Exact indentation used by the edit-history hook.
 automatic_media_old_edited = "                            if let image = media as? TelegramMediaImage {\n                                for representation in image.representations.sorted(by: {\n                                    Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                        > Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                                }) {\n                                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                                }\n                            } else if let file = media as? TelegramMediaFile {\n                                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                            }"
-automatic_media_new_edited = "                            if let image = media as? TelegramMediaImage,\n                               let representation = image.representations.max(by: {\n                                   Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                       < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                               }) {\n                                resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                            } else if let file = media as? TelegramMediaFile {\n                                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                            }"
+automatic_media_new_edited = "                            if let image = media as? TelegramMediaImage {\n                                let completedRepresentations = image.representations.filter {\n                                    mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: \"jpg\") != nil\n                                }\n                                let candidates = completedRepresentations.isEmpty ? image.representations : completedRepresentations\n                                if let representation = candidates.max(by: {\n                                    Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                        < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                                }) {\n                                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                                }\n                            } else if let file = media as? TelegramMediaFile {\n                                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                            }"
 for delete_file in delete_paths:
     if not delete_file.exists():
         continue
@@ -1337,6 +1342,15 @@ for delete_file in delete_paths:
         elif "AyuMediaResourceInfo" in d and "TelegramMediaImage" in d and "TelegramMediaFile" in d and "for representation in image.representations.sorted" in d:
             raise SystemExit(f"Automatic History photo capture anchor missing in {delete_file}")
         delete_file.write_text(d)
+
+# Verify every production deletion capture path prefers a complete image rendition.
+for deletion_source in delete_paths:
+    if not deletion_source.exists():
+        continue
+    source_text = deletion_source.read_text()
+    if 'mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: "jpg")' not in source_text:
+        raise SystemExit(f"Automatic History does not prefer completed photo renditions in {deletion_source}")
+print("Automatic History photo capture now prefers the largest completed rendition.")
 
 # 5) Manual AyuGram Save: retain sender name and local media even when Telegram's
 # own Save/Forward action is unavailable. It still depends on media being locally available.
