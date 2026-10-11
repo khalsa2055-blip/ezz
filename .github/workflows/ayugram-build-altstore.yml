@@ -35,6 +35,9 @@ jobs:
 
       - name: Restore Bazel build cache
         uses: actions/cache@v4
+        # A stale or oversized cache must never block the IPA build indefinitely.
+        timeout-minutes: 8
+        continue-on-error: true
         with:
           path: ~/telegram-bazel-cache
           key: ${{ runner.os }}-telegram-bazel-6ad963e5b62d-${{ hashFiles('patches/**') }}
