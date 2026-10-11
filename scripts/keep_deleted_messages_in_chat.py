@@ -141,18 +141,18 @@ capture.write_text(capture_text, encoding="utf-8")
 # Render the original AyuGram trash-bin image beside the timestamp.
 status_text = status_ui.read_text(encoding="utf-8")
 status_text = status_text.replace(
-    "        var edited: Bool\\n        var impressionCount: Int?",
-    "        var edited: Bool\\n        var isDeletedRetained: Bool\\n        var impressionCount: Int?",
+    "        var edited: Bool\n        var impressionCount: Int?",
+    "        var edited: Bool\n        var isDeletedRetained: Bool\n        var impressionCount: Int?",
     1
 )
 status_text = status_text.replace(
-    "            edited: Bool,\\n            impressionCount: Int?",
-    "            edited: Bool,\\n            isDeletedRetained: Bool = false,\\n            impressionCount: Int?",
+    "            edited: Bool,\n            impressionCount: Int?",
+    "            edited: Bool,\n            isDeletedRetained: Bool = false,\n            impressionCount: Int?",
     1
 )
 status_text = status_text.replace(
-    "            self.edited = edited\\n            self.impressionCount =",
-    "            self.edited = edited\\n            self.isDeletedRetained = isDeletedRetained\\n            self.impressionCount =",
+    "            self.edited = edited\n            self.impressionCount =",
+    "            self.edited = edited\n            self.isDeletedRetained = isDeletedRetained\n            self.impressionCount =",
     1
 )
 
@@ -164,26 +164,26 @@ icon_declaration = '''private let ayuGramDeletedMessageIcon: UIImage? = {
     }
     return UIImage(data: data)?.withRenderingMode(.alwaysTemplate)
 }()'''
-icon_anchor = "private let reactionFont = Font.regular(12.0)\\n"
+icon_anchor = "private let reactionFont = Font.regular(12.0)\n"
 if "private let ayuGramDeletedMessageIcon" not in status_text:
     if icon_anchor not in status_text:
         raise SystemExit("Could not locate status-node icon declaration anchor.")
-    status_text = status_text.replace(icon_anchor, icon_anchor + "\\n" + icon_declaration + "\\n", 1)
+    status_text = status_text.replace(icon_anchor, icon_anchor + "\n" + icon_declaration + "\n", 1)
 
 # Keep an ASImageNode for the deletion icon, independent of message text.
 if "private var deletedIconNode: ASImageNode?" not in status_text:
-    prop_anchor = "    private var impressionIcon: ASImageNode?\\n"
+    prop_anchor = "    private var impressionIcon: ASImageNode?\n"
     if prop_anchor not in status_text:
         raise SystemExit("Could not locate date/status image-node properties.")
-    status_text = status_text.replace(prop_anchor, prop_anchor + "    private var deletedIconNode: ASImageNode?\\n", 1)
+    status_text = status_text.replace(prop_anchor, prop_anchor + "    private var deletedIconNode: ASImageNode?\n", 1)
 
 if "var currentDeletedIconNode = self.deletedIconNode" not in status_text:
-    current_anchor = "        var currentImpressionIcon = self.impressionIcon\\n"
+    current_anchor = "        var currentImpressionIcon = self.impressionIcon\n"
     if current_anchor not in status_text:
         raise SystemExit("Could not locate date/status layout node locals.")
-    status_text = status_text.replace(current_anchor, current_anchor + "        var currentDeletedIconNode = self.deletedIconNode\\n", 1)
+    status_text = status_text.replace(current_anchor, current_anchor + "        var currentDeletedIconNode = self.deletedIconNode\n", 1)
 
-status_anchor = "            var updatedDateText = arguments.dateText\\n"
+status_anchor = "            var updatedDateText = arguments.dateText\n"
 status_replacement = """            var updatedDateText = arguments.dateText
 """
 if status_anchor in status_text:
