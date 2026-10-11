@@ -240,6 +240,10 @@ jobs:
         working-directory: telegram-ios
         run: python3 "$GITHUB_WORKSPACE/scripts/harden_ayugram_history.py"
 
+      - name: Keep eligible deleted messages in chat
+        working-directory: telegram-ios
+        run: python3 "$GITHUB_WORKSPACE/scripts/keep_deleted_messages_in_chat.py"
+
       - name: Fix binary-output decoding in Telegram build helper
         working-directory: telegram-ios
         run: |
