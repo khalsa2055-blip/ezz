@@ -134,7 +134,7 @@ helper = r'''
                 attributes: message.attributes,
                 media: message.media
             )
-            _ = transaction.addMessages([localCopy], location: .Random)
+            _ = transaction.addMessages([localCopy], location: .UpperHistoryBlock)
         }
     }
 '''
@@ -207,7 +207,7 @@ interactive_file_ui.write_text(interactive_file_text, encoding="utf-8")
 checks = {
     "chat history namespace clone": "namespace: 0," in capture_text,
     "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 0 && (item.message.globallyUniqueId ?? 0) <= Int64.min + Int64(Int32.max)," in bubble_text,
-    "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
+    "Postbox history insertion": "transaction.addMessages([localCopy], location: .UpperHistoryBlock)" in capture_text,
     "retained-message sentinel": "Int64.min + Int64(message.id.id)" in capture_text and "isRetainedDeletedMessage(_ message: Message)" in capture_text,
     "timestamp trash marker": 'updatedDateText = "🗑️ " + updatedDateText' in status_text,
     "interactive-file timestamp flag": "isDeletedRetained: arguments.message.id.namespace == 0 && (arguments.message.globallyUniqueId ?? 0) <= Int64.min + Int64(Int32.max)," in interactive_file_text,
