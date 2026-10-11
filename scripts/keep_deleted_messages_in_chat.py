@@ -116,7 +116,9 @@ helper = r'''
                 localTags: [],
                 forwardInfo: storedForwardInfo,
                 authorId: message.author?.id,
-                text: message.text,
+                // Visible AyuGram-style deleted marker on the retained chat copy.
+                // This stays local-only and does not alter the original server message.
+                text: "🗑️ " + message.text,
                 attributes: message.attributes,
                 media: message.media
             )
@@ -136,6 +138,7 @@ capture.write_text(capture_text, encoding="utf-8")
 checks = {
     "local namespace clone": "namespace: 1," in capture_text,
     "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
+    "visible trash marker": 'text: "🗑️ " + message.text' in capture_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
     "channel deletion allow-list": "AyuGramCaptureService.captureDeleted(" in state_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in state_text,
