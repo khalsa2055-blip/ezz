@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - test-history-list-ipa-232
+      - deleted-message-trash-icon
     paths:
       - '.github/workflows/ayugram-build-altstore.yml'
       - 'patches/**'
