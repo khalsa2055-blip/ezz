@@ -14,8 +14,9 @@ delete = root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteM
 state = root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift"
 status_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift"
 bubble_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift"
+interactive_file_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageInteractiveFileNode/Sources/ChatMessageInteractiveFileNode.swift"
 
-for path in (capture, delete, state, status_ui, bubble_ui):
+for path in (capture, delete, state, status_ui, bubble_ui, interactive_file_ui):
     if not path.is_file():
         raise SystemExit(f"Required Telegram/AyuGram source is missing: {path}")
 
@@ -146,7 +147,7 @@ status_text = status_text.replace(
 )
 status_text = status_text.replace(
     "            edited: Bool,\n            impressionCount: Int?",
-    "            edited: Bool,\n            isDeletedRetained: Bool,\n            impressionCount: Int?",
+    "            edited: Bool,\n            isDeletedRetained: Bool = false,\n            impressionCount: Int?",
     1
 )
 status_text = status_text.replace(
@@ -178,12 +179,29 @@ elif "isDeletedRetained: item.message.id.namespace == 1," not in bubble_text:
     raise SystemExit("Could not pass Local namespace state to message timestamp UI.")
 bubble_ui.write_text(bubble_text, encoding="utf-8")
 
+# The interactive-file bubble has a separate date/status initializer call. Pass
+# the Local namespace flag there too; the initializer's default keeps every
+# other Telegram call site source-compatible.
+interactive_file_text = interactive_file_ui.read_text(encoding="utf-8")
+interactive_anchor = """                        edited: edited && !arguments.presentationData.isPreview,
+                        impressionCount:"""
+interactive_replacement = """                        edited: edited && !arguments.presentationData.isPreview,
+                        isDeletedRetained: arguments.message.id.namespace == 1,
+                        impressionCount:"""
+if interactive_anchor in interactive_file_text:
+    interactive_file_text = interactive_file_text.replace(interactive_anchor, interactive_replacement, 1)
+elif "isDeletedRetained: arguments.message.id.namespace == 1," not in interactive_file_text:
+    raise SystemExit("Could not pass retained-message state to interactive file timestamp UI.")
+interactive_file_ui.write_text(interactive_file_text, encoding="utf-8")
+
 # Fail the build early if either update path is no longer wired to the helper.
 checks = {
     "local namespace clone": "namespace: 1," in capture_text,
     "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 1" in bubble_text,
     "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
     "timestamp trash marker": 'updatedDateText = "🗑️ " + updatedDateText' in status_text,
+    "interactive-file timestamp flag": "isDeletedRetained: arguments.message.id.namespace == 1," in interactive_file_text,
+    "backward-compatible initializer default": "isDeletedRetained: Bool = false," in status_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
     "channel deletion allow-list": "AyuGramCaptureService.captureDeleted(" in state_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in state_text,
