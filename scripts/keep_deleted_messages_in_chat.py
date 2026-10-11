@@ -15,8 +15,9 @@ state = root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtil
 status_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift"
 bubble_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift"
 interactive_file_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageInteractiveFileNode/Sources/ChatMessageInteractiveFileNode.swift"
+interactive_media_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageInteractiveMediaNode/Sources/ChatMessageInteractiveMediaNode.swift"
 
-for path in (capture, delete, state, status_ui, bubble_ui, interactive_file_ui):
+for path in (capture, delete, state, status_ui, bubble_ui, interactive_file_ui, interactive_media_ui):
     if not path.is_file():
         raise SystemExit(f"Required Telegram/AyuGram source is missing: {path}")
 
@@ -290,7 +291,21 @@ elif "isDeletedRetained: arguments.message.id.namespace == 1," not in interactiv
     raise SystemExit("Could not pass retained-message state to interactive file timestamp UI.")
 interactive_file_ui.write_text(interactive_file_text, encoding="utf-8")
 
-# Fail the build early if either update path is no longer wired to the helper.
+# Photo/video messages use ChatMessageInteractiveMediaNode instead of the text
+# bubble or file node. Pass the same local-namespace flag to their timestamp too.
+interactive_media_text = interactive_media_ui.read_text(encoding="utf-8")
+media_anchor = """                    edited: dateAndStatus.edited && !presentationData.isPreview,
+                    impressionCount:"""
+media_replacement = """                    edited: dateAndStatus.edited && !presentationData.isPreview,
+                    isDeletedRetained: message.id.namespace == 1,
+                    impressionCount:"""
+if media_anchor in interactive_media_text:
+    interactive_media_text = interactive_media_text.replace(media_anchor, media_replacement, 1)
+elif "isDeletedRetained: message.id.namespace == 1," not in interactive_media_text:
+    raise SystemExit("Could not pass retained-message state to interactive media timestamp UI.")
+interactive_media_ui.write_text(interactive_media_text, encoding="utf-8")
+
+# Fail the build early if each message-rendering path is wired to the deleted flag.
 checks = {
     "local namespace clone": "namespace: 1," in capture_text,
     "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 1" in bubble_text,
@@ -298,6 +313,7 @@ checks = {
     "original AyuGram trash icon asset": "ayuGramDeletedMessageIcon" in status_text and "strongSelf.deletedIconNode = currentDeletedIconNode" in status_text,
     "timestamp uses image, not emoji text": 'updatedDateText = "🗑️ " + updatedDateText' not in status_text,
     "interactive-file timestamp flag": "isDeletedRetained: arguments.message.id.namespace == 1," in interactive_file_text,
+    "interactive-media timestamp flag": "isDeletedRetained: message.id.namespace == 1," in interactive_media_text,
     "backward-compatible initializer default": "isDeletedRetained: Bool = false," in status_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
