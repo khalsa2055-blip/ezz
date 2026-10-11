@@ -82,6 +82,20 @@ elif "Self.retainDeletedMessagesInChat(transaction: transaction" not in capture_
     raise SystemExit("Could not locate the deleted-message capture entry point.")
 
 helper = r'''
+    // Persist an explicit marker in a reserved global-ID prefix. The UI checks this
+    // marker so normal Local messages (pending sends, service notifications, etc.)
+    // are not incorrectly labeled as deleted.
+    private static func deletedMessageGlobalId(for message: Message) -> Int64 {
+        var value = UInt64(bitPattern: message.id.peerId.toInt64())
+        value ^= UInt64(UInt32(bitPattern: message.id.id)) &* 0x9E3779B185EBCA87
+        value ^= value >> 30
+        value &*= 0xBF58476D1CE4E5B9
+        value ^= value >> 27
+        value &*= 0x94D049BB133111EB
+        value ^= value >> 31
+        return Int64(bitPattern: 0xA7ED_DD00_0000_0000 | (value & 0x0000_00FF_FFFF_FFFF))
+    }
+
     /// Re-inserts a deleted message as a local-only history entry. Postbox
     /// persists Local-namespace messages across launches; the server-side
     /// Cloud message is still deleted normally and is never re-sent.
@@ -110,7 +124,7 @@ helper = r'''
                 peerId: message.id.peerId,
                 namespace: 1,
                 customStableId: nil,
-                globallyUniqueId: Int64.random(in: Int64.min...Int64.max),
+                globallyUniqueId: Self.deletedMessageGlobalId(for: message),
                 groupingKey: message.groupingKey,
                 threadId: message.threadId,
                 timestamp: message.timestamp,
@@ -126,7 +140,7 @@ helper = r'''
                 attributes: message.attributes,
                 media: message.media
             )
-            _ = transaction.addMessages([localCopy], location: .Random)
+            _ = transaction.addMessages([localCopy], location: .UpperHistoryBlock)
         }
     }
 '''
@@ -269,7 +283,7 @@ status_ui.write_text(status_text, encoding="utf-8")
 
 bubble_text = bubble_ui.read_text(encoding="utf-8")
 bubble_anchor = "                    edited: edited && !item.presentationData.isPreview,\n"
-bubble_replacement = bubble_anchor + "                    isDeletedRetained: item.message.id.namespace == 1,\n"
+bubble_replacement = bubble_anchor + "                    isDeletedRetained: item.message.id.namespace == 1 && item.message.globallyUniqueId.map { (UInt64(bitPattern: $0) & 0xFFFF_FF00_0000_0000) == 0xA7ED_DD00_0000_0000 } == true,\n"
 if bubble_anchor in bubble_text:
     bubble_text = bubble_text.replace(bubble_anchor, bubble_replacement, 1)
 elif "isDeletedRetained: item.message.id.namespace == 1," not in bubble_text:
@@ -283,7 +297,7 @@ interactive_file_text = interactive_file_ui.read_text(encoding="utf-8")
 interactive_anchor = """                        edited: edited && !arguments.presentationData.isPreview,
                         impressionCount:"""
 interactive_replacement = """                        edited: edited && !arguments.presentationData.isPreview,
-                        isDeletedRetained: arguments.message.id.namespace == 1,
+                        isDeletedRetained: arguments.message.id.namespace == 1 && arguments.message.globallyUniqueId.map { (UInt64(bitPattern: $0) & 0xFFFF_FF00_0000_0000) == 0xA7ED_DD00_0000_0000 } == true,
                         impressionCount:"""
 if interactive_anchor in interactive_file_text:
     interactive_file_text = interactive_file_text.replace(interactive_anchor, interactive_replacement, 1)
@@ -297,7 +311,7 @@ interactive_media_text = interactive_media_ui.read_text(encoding="utf-8")
 media_anchor = """                    edited: dateAndStatus.edited && !presentationData.isPreview,
                     impressionCount:"""
 media_replacement = """                    edited: dateAndStatus.edited && !presentationData.isPreview,
-                    isDeletedRetained: message.id.namespace == 1,
+                    isDeletedRetained: message.id.namespace == 1 && message.globallyUniqueId.map { (UInt64(bitPattern: $0) & 0xFFFF_FF00_0000_0000) == 0xA7ED_DD00_0000_0000 } == true,
                     impressionCount:"""
 if media_anchor in interactive_media_text:
     interactive_media_text = interactive_media_text.replace(media_anchor, media_replacement, 1)
@@ -308,12 +322,13 @@ interactive_media_ui.write_text(interactive_media_text, encoding="utf-8")
 # Fail the build early if each message-rendering path is wired to the deleted flag.
 checks = {
     "local namespace clone": "namespace: 1," in capture_text,
-    "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 1" in bubble_text,
-    "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
+    "timestamp status argument uses explicit marker": "isDeletedRetained: item.message.id.namespace == 1 && item.message.globallyUniqueId.map" in bubble_text,
+    "Postbox upper history reinjection": "transaction.addMessages([localCopy], location: .UpperHistoryBlock)" in capture_text,
+    "persisted retained-message marker": "Self.deletedMessageGlobalId(for: message)" in capture_text and "0xA7ED_DD00_0000_0000" in capture_text,
     "original AyuGram trash icon asset": "ayuGramDeletedMessageIcon" in status_text and "strongSelf.deletedIconNode = currentDeletedIconNode" in status_text,
     "timestamp uses image, not emoji text": 'updatedDateText = "🗑️ " + updatedDateText' not in status_text,
-    "interactive-file timestamp flag": "isDeletedRetained: arguments.message.id.namespace == 1," in interactive_file_text,
-    "interactive-media timestamp flag": "isDeletedRetained: message.id.namespace == 1," in interactive_media_text,
+    "interactive-file timestamp checks explicit marker": "isDeletedRetained: arguments.message.id.namespace == 1 && arguments.message.globallyUniqueId.map" in interactive_file_text,
+    "interactive-media timestamp checks explicit marker": "isDeletedRetained: message.id.namespace == 1 && message.globallyUniqueId.map" in interactive_media_text,
     "backward-compatible initializer default": "isDeletedRetained: Bool = false," in status_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
