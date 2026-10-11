@@ -138,34 +138,130 @@ if "private static func retainDeletedMessagesInChat" not in capture_text:
 capture.write_text(capture_text, encoding="utf-8")
 
 
-# Render the deleted marker in the timestamp/status line, not inside message text.
+# Render the original AyuGram trash-bin image beside the timestamp.
 status_text = status_ui.read_text(encoding="utf-8")
 status_text = status_text.replace(
-    "        var edited: Bool\n        var impressionCount: Int?",
-    "        var edited: Bool\n        var isDeletedRetained: Bool\n        var impressionCount: Int?",
+    "        var edited: Bool\\n        var impressionCount: Int?",
+    "        var edited: Bool\\n        var isDeletedRetained: Bool\\n        var impressionCount: Int?",
     1
 )
 status_text = status_text.replace(
-    "            edited: Bool,\n            impressionCount: Int?",
-    "            edited: Bool,\n            isDeletedRetained: Bool = false,\n            impressionCount: Int?",
+    "            edited: Bool,\\n            impressionCount: Int?",
+    "            edited: Bool,\\n            isDeletedRetained: Bool = false,\\n            impressionCount: Int?",
     1
 )
 status_text = status_text.replace(
-    "            self.edited = edited\n            self.impressionCount =",
-    "            self.edited = edited\n            self.isDeletedRetained = isDeletedRetained\n            self.impressionCount =",
+    "            self.edited = edited\\n            self.impressionCount =",
+    "            self.edited = edited\\n            self.isDeletedRetained = isDeletedRetained\\n            self.impressionCount =",
     1
 )
-status_anchor = "            var updatedDateText = arguments.dateText\n"
+
+# This is the original AyuGram Desktop Telegram/Resources/icons/ayu/trash_bin.png
+# embedded directly from the 20x24 PNG so its exact artwork is used in the IPA.
+icon_declaration = '''private let ayuGramDeletedMessageIcon: UIImage? = {
+    guard let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAABQAAAAYCAYAAAD6S912AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAADcSURBVHgB7ZTRDYQgDIZ/zL3rBjqCIziSo+gErqATuIIj6ATqBBwl8UGgQAhvd19CYgr90haiACCRkQKZ+YQOtG2Lqqr0977veoWQ3BqGQZp0XSd9OZZQVSObptGJ53lawnVdpapan3EJBYxLmaYJSoYY+r7HsiyvmCV8oLk9szMJzdEqm9oJQW27cp3PRgkRoixLZ7xIaYm47zteGIN6AfHC67oQgquQvWU1d/gQQjjjbMu+OW7bxu6xwnEc2aR5ntk9tmWCnk9d168YVX4cB5KEKWT/H/6FvyD8Au03q6Ilts/6AAAAAElFTkSuQmCC") else {
+        return nil
+    }
+    return UIImage(data: data)?.withRenderingMode(.alwaysTemplate)
+}()'''
+icon_anchor = "private let reactionFont = Font.regular(12.0)\\n"
+if "private let ayuGramDeletedMessageIcon" not in status_text:
+    if icon_anchor not in status_text:
+        raise SystemExit("Could not locate status-node icon declaration anchor.")
+    status_text = status_text.replace(icon_anchor, icon_anchor + "\\n" + icon_declaration + "\\n", 1)
+
+# Keep an ASImageNode for the deletion icon, independent of message text.
+if "private var deletedIconNode: ASImageNode?" not in status_text:
+    prop_anchor = "    private var impressionIcon: ASImageNode?\\n"
+    if prop_anchor not in status_text:
+        raise SystemExit("Could not locate date/status image-node properties.")
+    status_text = status_text.replace(prop_anchor, prop_anchor + "    private var deletedIconNode: ASImageNode?\\n", 1)
+
+if "var currentDeletedIconNode = self.deletedIconNode" not in status_text:
+    current_anchor = "        var currentImpressionIcon = self.impressionIcon\\n"
+    if current_anchor not in status_text:
+        raise SystemExit("Could not locate date/status layout node locals.")
+    status_text = status_text.replace(current_anchor, current_anchor + "        var currentDeletedIconNode = self.deletedIconNode\\n", 1)
+
+status_anchor = "            var updatedDateText = arguments.dateText\\n"
 status_replacement = """            var updatedDateText = arguments.dateText
-            if arguments.isDeletedRetained {
-                // Keep message content untouched; show the trash marker with the time.
-                updatedDateText = "🗑️ " + updatedDateText
-            }
 """
 if status_anchor in status_text:
     status_text = status_text.replace(status_anchor, status_replacement, 1)
-elif 'if arguments.isDeletedRetained {' not in status_text:
-    raise SystemExit("Could not locate timestamp label for deleted marker.")
+elif "var updatedDateText = arguments.dateText" not in status_text:
+    raise SystemExit("Could not locate timestamp label for deleted icon.")
+
+date_layout_anchor = """            let dateFont = Font.regular(floor(arguments.presentationData.fontSize.baseDisplaySize * 11.0 / 17.0))
+            let (date, dateApply) = dateLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: updatedDateText, font: dateFont, textColor: dateColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: arguments.constrainedSize, alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+"""
+date_layout_replacement = """            let deletedIconImage: UIImage? = arguments.isDeletedRetained ? ayuGramDeletedMessageIcon?.withTintColor(dateColor, renderingMode: .alwaysOriginal) : nil
+            let deletedIconSize: CGSize = deletedIconImage == nil ? CGSize.zero : CGSize(width: 10.0, height: 12.0)
+            let deletedIconSpacing: CGFloat = deletedIconImage == nil ? 0.0 : 3.0
+            if deletedIconImage != nil {
+                if currentDeletedIconNode == nil {
+                    let iconNode = ASImageNode()
+                    iconNode.isLayerBacked = true
+                    iconNode.displayWithoutProcessing = true
+                    iconNode.displaysAsynchronously = false
+                    iconNode.contentMode = .scaleAspectFit
+                    currentDeletedIconNode = iconNode
+                }
+            } else {
+                currentDeletedIconNode = nil
+            }
+
+            let dateFont = Font.regular(floor(arguments.presentationData.fontSize.baseDisplaySize * 11.0 / 17.0))
+            let (date, dateApply) = dateLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: updatedDateText, font: dateFont, textColor: dateColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: arguments.constrainedSize, alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+"""
+if date_layout_anchor in status_text:
+    status_text = status_text.replace(date_layout_anchor, date_layout_replacement, 1)
+elif "let deletedIconSize: CGSize" not in status_text:
+    raise SystemExit("Could not insert deleted-icon layout sizing.")
+
+layout_anchor = "            let layoutSize = CGSize(width: leftInset + impressionWidth + date.size.width + statusWidth + backgroundInsets.left + backgroundInsets.right, height: date.size.height + backgroundInsets.top + backgroundInsets.bottom)"
+layout_replacement = "            let layoutSize = CGSize(width: leftInset + impressionWidth + deletedIconSize.width + deletedIconSpacing + date.size.width + statusWidth + backgroundInsets.left + backgroundInsets.right, height: date.size.height + backgroundInsets.top + backgroundInsets.bottom)"
+if layout_anchor in status_text:
+    status_text = status_text.replace(layout_anchor, layout_replacement, 1)
+elif layout_replacement not in status_text:
+    raise SystemExit("Could not account for the deletion icon in timestamp width.")
+
+status_text = status_text.replace(
+    "leftInset + impressionWidth + date.size.width +",
+    "leftInset + impressionWidth + deletedIconSize.width + deletedIconSpacing + date.size.width +"
+)
+status_text = status_text.replace(
+    "leftInset + date.size.width + 8.5",
+    "leftInset + deletedIconSize.width + deletedIconSpacing + date.size.width + 8.5"
+)
+
+date_frame_anchor = "                        animation.animator.updateFrame(layer: strongSelf.dateNode.layer, frame: CGRect(origin: CGPoint(x: leftOffset + leftInset + backgroundInsets.left + impressionWidth, y: backgroundInsets.top + 1.0 + offset + verticalInset), size: date.size), completion: nil)"
+date_frame_replacement = """                        if let currentDeletedIconNode = currentDeletedIconNode, let deletedIconImage = deletedIconImage {
+                            currentDeletedIconNode.image = deletedIconImage
+                            let deletedIconFrame = CGRect(
+                                origin: CGPoint(
+                                    x: leftOffset + leftInset + backgroundInsets.left + impressionWidth,
+                                    y: backgroundInsets.top + 1.0 + offset + verticalInset + floor((date.size.height - deletedIconSize.height) / 2.0)
+                                ),
+                                size: deletedIconSize
+                            )
+                            if currentDeletedIconNode.supernode == nil {
+                                strongSelf.deletedIconNode = currentDeletedIconNode
+                                strongSelf.addSubnode(currentDeletedIconNode)
+                                currentDeletedIconNode.frame = deletedIconFrame
+                            } else {
+                                animation.animator.updateFrame(layer: currentDeletedIconNode.layer, frame: deletedIconFrame, completion: nil)
+                            }
+                        } else if let deletedIconNode = strongSelf.deletedIconNode {
+                            deletedIconNode.removeFromSupernode()
+                            strongSelf.deletedIconNode = nil
+                        }
+
+                        animation.animator.updateFrame(layer: strongSelf.dateNode.layer, frame: CGRect(origin: CGPoint(x: leftOffset + leftInset + backgroundInsets.left + impressionWidth + deletedIconSize.width + deletedIconSpacing, y: backgroundInsets.top + 1.0 + offset + verticalInset), size: date.size), completion: nil)"""
+if date_frame_anchor in status_text:
+    status_text = status_text.replace(date_frame_anchor, date_frame_replacement, 1)
+elif "strongSelf.deletedIconNode = currentDeletedIconNode" not in status_text:
+    raise SystemExit("Could not insert the original trash icon beside the timestamp.")
+
 if "var isDeletedRetained: Bool" not in status_text or "self.isDeletedRetained = isDeletedRetained" not in status_text:
     raise SystemExit("Could not wire retained-message state into timestamp arguments.")
 status_ui.write_text(status_text, encoding="utf-8")
@@ -199,7 +295,8 @@ checks = {
     "local namespace clone": "namespace: 1," in capture_text,
     "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 1" in bubble_text,
     "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
-    "timestamp trash marker": 'updatedDateText = "🗑️ " + updatedDateText' in status_text,
+    "original AyuGram trash icon asset": "ayuGramDeletedMessageIcon" in status_text and "strongSelf.deletedIconNode = currentDeletedIconNode" in status_text,
+    "timestamp uses image, not emoji text": 'updatedDateText = "🗑️ " + updatedDateText' not in status_text,
     "interactive-file timestamp flag": "isDeletedRetained: arguments.message.id.namespace == 1," in interactive_file_text,
     "backward-compatible initializer default": "isDeletedRetained: Bool = false," in status_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
