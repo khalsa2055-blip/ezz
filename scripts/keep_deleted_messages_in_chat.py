@@ -308,4 +308,4 @@ failed = [name for name, passed in checks.items() if not passed]
 if failed:
     raise SystemExit("Keep-deleted-in-chat integration checks failed: " + ", ".join(failed))
 
-print("AyuGram keep-deleted-in-chat integration applied: eligible messages are copied to Postbox Local before server deletion; secret/copy-protected messages remain excluded.")
+print("AyuGram keep-deleted-in-chat integration applied: Local copies remain enabled, secret/copy-protected messages stay excluded, and the original AyuGram trash-bin icon is wired beside timestamps.")
