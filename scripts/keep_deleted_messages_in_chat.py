@@ -81,9 +81,16 @@ elif "Self.retainDeletedMessagesInChat(transaction: transaction" not in capture_
     raise SystemExit("Could not locate the deleted-message capture entry point.")
 
 helper = r'''
-    /// Re-inserts a deleted message as a local-only history entry. Postbox
-    /// persists Local-namespace messages across launches; the server-side
-    /// Cloud message is still deleted normally and is never re-sent.
+    /// Re-inserts a deleted message into the namespace queried by the normal chat
+    /// history view. The reserved global-ID range identifies these rows as local-only.
+    /// The original server message is still deleted normally and is never re-sent.
+    public static func isRetainedDeletedMessage(_ message: Message) -> Bool {
+        guard message.id.namespace == 0, let globalId = message.globallyUniqueId else {
+            return false
+        }
+        return globalId >= Int64.min && globalId <= Int64.min + Int64(Int32.max)
+    }
+
     private static func retainDeletedMessagesInChat(transaction: Transaction, messages: [Message]) {
         for message in messages {
             // Keep the module independent of TelegramCore (which imports AyuGramIOS):
@@ -107,9 +114,12 @@ helper = r'''
 
             let localCopy = StoreMessage(
                 peerId: message.id.peerId,
-                namespace: 1,
+                // Use the normal chat-history namespace so Telegram iOS's regular
+                // history query can render the retained copy. The sentinel global ID
+                // marks this row as client-only; it is never sent to Telegram.
+                namespace: 0,
                 customStableId: nil,
-                globallyUniqueId: Int64.random(in: Int64.min...Int64.max),
+                globallyUniqueId: Int64.min + Int64(message.id.id),
                 groupingKey: message.groupingKey,
                 threadId: message.threadId,
                 timestamp: message.timestamp,
@@ -172,7 +182,7 @@ status_ui.write_text(status_text, encoding="utf-8")
 
 bubble_text = bubble_ui.read_text(encoding="utf-8")
 bubble_anchor = "                    edited: edited && !item.presentationData.isPreview,\n"
-bubble_replacement = bubble_anchor + "                    isDeletedRetained: item.message.id.namespace == 1,\n"
+bubble_replacement = bubble_anchor + "                    isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(item.message),\n"
 if bubble_anchor in bubble_text:
     bubble_text = bubble_text.replace(bubble_anchor, bubble_replacement, 1)
 elif "isDeletedRetained: item.message.id.namespace == 1," not in bubble_text:
@@ -186,7 +196,7 @@ interactive_file_text = interactive_file_ui.read_text(encoding="utf-8")
 interactive_anchor = """                        edited: edited && !arguments.presentationData.isPreview,
                         impressionCount:"""
 interactive_replacement = """                        edited: edited && !arguments.presentationData.isPreview,
-                        isDeletedRetained: arguments.message.id.namespace == 1,
+                        isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(arguments.message),
                         impressionCount:"""
 if interactive_anchor in interactive_file_text:
     interactive_file_text = interactive_file_text.replace(interactive_anchor, interactive_replacement, 1)
@@ -196,11 +206,12 @@ interactive_file_ui.write_text(interactive_file_text, encoding="utf-8")
 
 # Fail the build early if either update path is no longer wired to the helper.
 checks = {
-    "local namespace clone": "namespace: 1," in capture_text,
-    "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 1" in bubble_text,
+    "chat history namespace clone": "namespace: 0," in capture_text,
+    "timestamp status argument": "isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(item.message)" in bubble_text,
     "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
+    "retained-message sentinel": "Int64.min + Int64(message.id.id)" in capture_text and "isRetainedDeletedMessage(_ message: Message)" in capture_text,
     "timestamp trash marker": 'updatedDateText = "🗑️ " + updatedDateText' in status_text,
-    "interactive-file timestamp flag": "isDeletedRetained: arguments.message.id.namespace == 1," in interactive_file_text,
+    "interactive-file timestamp flag": "isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(arguments.message)," in interactive_file_text,
     "backward-compatible initializer default": "isDeletedRetained: Bool = false," in status_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
