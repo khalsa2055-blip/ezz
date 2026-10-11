@@ -12,8 +12,10 @@ root = Path.cwd()
 capture = root / "submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift"
 delete = root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift"
 state = root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift"
+status_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift"
+bubble_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift"
 
-for path in (capture, delete, state):
+for path in (capture, delete, state, status_ui, bubble_ui):
     if not path.is_file():
         raise SystemExit(f"Required Telegram/AyuGram source is missing: {path}")
 
@@ -118,7 +120,7 @@ helper = r'''
                 authorId: message.author?.id,
                 // Visible AyuGram-style deleted marker on the retained chat copy.
                 // This stays local-only and does not alter the original server message.
-                text: "🗑️ " + message.text,
+                text: message.text,
                 attributes: message.attributes,
                 media: message.media
             )
@@ -134,11 +136,54 @@ if "private static func retainDeletedMessagesInChat" not in capture_text:
 
 capture.write_text(capture_text, encoding="utf-8")
 
+
+# Render the deleted marker in the timestamp/status line, not inside message text.
+status_text = status_ui.read_text(encoding="utf-8")
+status_text = status_text.replace(
+    "        var edited: Bool\n        var impressionCount: Int?",
+    "        var edited: Bool\n        var isDeletedRetained: Bool\n        var impressionCount: Int?",
+    1
+)
+status_text = status_text.replace(
+    "            edited: Bool,\n            impressionCount: Int?",
+    "            edited: Bool,\n            isDeletedRetained: Bool,\n            impressionCount: Int?",
+    1
+)
+status_text = status_text.replace(
+    "            self.edited = edited\n            self.impressionCount =",
+    "            self.edited = edited\n            self.isDeletedRetained = isDeletedRetained\n            self.impressionCount =",
+    1
+)
+status_anchor = "            var updatedDateText = arguments.dateText\n"
+status_replacement = """            var updatedDateText = arguments.dateText
+            if arguments.isDeletedRetained {
+                // Keep message content untouched; show the trash marker with the time.
+                updatedDateText = "🗑️ " + updatedDateText
+            }
+"""
+if status_anchor in status_text:
+    status_text = status_text.replace(status_anchor, status_replacement, 1)
+elif 'if arguments.isDeletedRetained {' not in status_text:
+    raise SystemExit("Could not locate timestamp label for deleted marker.")
+if "var isDeletedRetained: Bool" not in status_text or "self.isDeletedRetained = isDeletedRetained" not in status_text:
+    raise SystemExit("Could not wire retained-message state into timestamp arguments.")
+status_ui.write_text(status_text, encoding="utf-8")
+
+bubble_text = bubble_ui.read_text(encoding="utf-8")
+bubble_anchor = "                    edited: edited && !item.presentationData.isPreview,\n"
+bubble_replacement = bubble_anchor + "                    isDeletedRetained: item.message.id.namespace == 1,\n"
+if bubble_anchor in bubble_text:
+    bubble_text = bubble_text.replace(bubble_anchor, bubble_replacement, 1)
+elif "isDeletedRetained: item.message.id.namespace == 1," not in bubble_text:
+    raise SystemExit("Could not pass Local namespace state to message timestamp UI.")
+bubble_ui.write_text(bubble_text, encoding="utf-8")
+
 # Fail the build early if either update path is no longer wired to the helper.
 checks = {
     "local namespace clone": "namespace: 1," in capture_text,
+    "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 1" in bubble_text,
     "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
-    "visible trash marker": 'text: "🗑️ " + message.text' in capture_text,
+    "timestamp trash marker": 'updatedDateText = "🗑️ " + updatedDateText' in status_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
     "channel deletion allow-list": "AyuGramCaptureService.captureDeleted(" in state_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in state_text,
