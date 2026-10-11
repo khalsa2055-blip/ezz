@@ -83,7 +83,9 @@ helper = r'''
     /// Cloud message is still deleted normally and is never re-sent.
     private static func retainDeletedMessagesInChat(transaction: Transaction, messages: [Message]) {
         for message in messages {
-            guard message.id.namespace == Namespaces.Message.Cloud else {
+            // Keep the module independent of TelegramCore (which imports AyuGramIOS):
+            // TelegramCore SyncCore_Namespaces defines Cloud = 0 and Local = 1.
+            guard message.id.namespace == 0 else {
                 continue
             }
 
@@ -102,7 +104,7 @@ helper = r'''
 
             let localCopy = StoreMessage(
                 peerId: message.id.peerId,
-                namespace: Namespaces.Message.Local,
+                namespace: 1,
                 customStableId: nil,
                 globallyUniqueId: Int64.random(in: Int64.min...Int64.max),
                 groupingKey: message.groupingKey,
@@ -132,7 +134,7 @@ capture.write_text(capture_text, encoding="utf-8")
 
 # Fail the build early if either update path is no longer wired to the helper.
 checks = {
-    "local namespace clone": "namespace: Namespaces.Message.Local" in capture_text,
+    "local namespace clone": "namespace: 1," in capture_text,
     "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
