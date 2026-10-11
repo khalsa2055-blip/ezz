@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Persist an eligible, local-only copy of each deleted message in its chat.
+"""Persist eligible deleted messages as client-only rows in chat history.
 
 Run after harden_ayugram_history.py. The original Telegram deletion still
-executes normally; this adds a separate Postbox Local-namespace entry, matching
-AyuGram's anti-recall/reinjection model without sending anything to Telegram.
-Copy-protected messages and secret media remain excluded by the caller.
+executes normally; a reserved global-ID sentinel identifies the retained local
+copy. Copy-protected messages and secret media remain excluded by the caller.
 """
 from pathlib import Path
 
@@ -182,7 +181,7 @@ status_ui.write_text(status_text, encoding="utf-8")
 
 bubble_text = bubble_ui.read_text(encoding="utf-8")
 bubble_anchor = "                    edited: edited && !item.presentationData.isPreview,\n"
-bubble_replacement = bubble_anchor + "                    isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(item.message),\n"
+bubble_replacement = bubble_anchor + "                    isDeletedRetained: item.message.id.namespace == 0 && (item.message.globallyUniqueId ?? 0) <= Int64.min + Int64(Int32.max),\n"
 if bubble_anchor in bubble_text:
     bubble_text = bubble_text.replace(bubble_anchor, bubble_replacement, 1)
 elif "isDeletedRetained: item.message.id.namespace == 1," not in bubble_text:
@@ -196,7 +195,7 @@ interactive_file_text = interactive_file_ui.read_text(encoding="utf-8")
 interactive_anchor = """                        edited: edited && !arguments.presentationData.isPreview,
                         impressionCount:"""
 interactive_replacement = """                        edited: edited && !arguments.presentationData.isPreview,
-                        isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(arguments.message),
+                        isDeletedRetained: arguments.message.id.namespace == 0 && (arguments.message.globallyUniqueId ?? 0) <= Int64.min + Int64(Int32.max),
                         impressionCount:"""
 if interactive_anchor in interactive_file_text:
     interactive_file_text = interactive_file_text.replace(interactive_anchor, interactive_replacement, 1)
@@ -207,11 +206,11 @@ interactive_file_ui.write_text(interactive_file_text, encoding="utf-8")
 # Fail the build early if either update path is no longer wired to the helper.
 checks = {
     "chat history namespace clone": "namespace: 0," in capture_text,
-    "timestamp status argument": "isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(item.message)" in bubble_text,
+    "timestamp status argument": "isDeletedRetained: item.message.id.namespace == 0 && (item.message.globallyUniqueId ?? 0) <= Int64.min + Int64(Int32.max)," in bubble_text,
     "Postbox local insertion": "transaction.addMessages([localCopy], location: .Random)" in capture_text,
     "retained-message sentinel": "Int64.min + Int64(message.id.id)" in capture_text and "isRetainedDeletedMessage(_ message: Message)" in capture_text,
     "timestamp trash marker": 'updatedDateText = "🗑️ " + updatedDateText' in status_text,
-    "interactive-file timestamp flag": "isDeletedRetained: AyuGramCaptureService.isRetainedDeletedMessage(arguments.message)," in interactive_file_text,
+    "interactive-file timestamp flag": "isDeletedRetained: arguments.message.id.namespace == 0 && (arguments.message.globallyUniqueId ?? 0) <= Int64.min + Int64(Int32.max)," in interactive_file_text,
     "backward-compatible initializer default": "isDeletedRetained: Bool = false," in status_text,
     "History remains enabled": "AyuGramPostboxHistoryStore.appendDeleted" in capture_text,
     "regular deletion allow-list": "AyuGramCaptureService.captureDeleted(" in delete_text and "mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))" in delete_text,
