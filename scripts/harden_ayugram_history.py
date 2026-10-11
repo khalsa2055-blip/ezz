@@ -52,55 +52,6 @@ for p in (archive, message, store, capture):
     if not p.exists():
         raise SystemExit(f"Missing AyuGram history source: {p}")
 
-# Preserve each pre-edit media revision in an immutable, revision-specific folder.
-# The edit hook runs before transaction.updateMessage, so the captured Message is
-# the original version. Without revisionID, every edit points at the same path
-# and later history entries can misleadingly show the first file for all versions.
-archive_text = archive.read_text()
-old_archive_signature = """        messageID: Int32,
-        resources: [AyuMediaResourceInfo]
-    ) -> (path: String?, mimeType: String?) {"""
-new_archive_signature = """        messageID: Int32,
-        resources: [AyuMediaResourceInfo],
-        revisionID: Int32? = nil
-    ) -> (path: String?, mimeType: String?) {"""
-if old_archive_signature in archive_text:
-    archive_text = archive_text.replace(old_archive_signature, new_archive_signature, 1)
-elif "revisionID: Int32? = nil" not in archive_text:
-    raise SystemExit("Media archive signature anchor not found")
-
-old_archive_path = """            .appendingPathComponent(String(dialogID), isDirectory: true)
-            .appendingPathComponent(String(messageID), isDirectory: true) else {"""
-new_archive_path = """            .appendingPathComponent(String(dialogID), isDirectory: true)
-            .appendingPathComponent(String(messageID), isDirectory: true)
-            .appendingPathComponent(revisionID.map { "revision-\\($0)" } ?? "original", isDirectory: true) else {"""
-if old_archive_path in archive_text:
-    archive_text = archive_text.replace(old_archive_path, new_archive_path, 1)
-elif 'revisionID.map { "revision-\\($0)" } ?? "original"' not in archive_text:
-    raise SystemExit("Media archive path anchor not found")
-archive.write_text(archive_text)
-
-capture_text = capture.read_text()
-edited_start = capture_text.find("    public static func captureEdited(")
-if edited_start < 0:
-    raise SystemExit("captureEdited entry point not found")
-edited_end = capture_text.find("\n    }", edited_start)
-# Match the exact archive call in captureEdited, not the delete capture call.
-edited_section = capture_text[edited_start:]
-old_edit_archive_call = """                messageID: message.id.id,
-                resources: mediaCapture.resources
-            )"""
-new_edit_archive_call = """                messageID: message.id.id,
-                resources: mediaCapture.resources,
-                revisionID: editDate
-            )"""
-if old_edit_archive_call in edited_section:
-    edited_section = edited_section.replace(old_edit_archive_call, new_edit_archive_call, 1)
-elif "revisionID: editDate" not in edited_section:
-    raise SystemExit("captureEdited archive call anchor not found")
-capture_text = capture_text[:edited_start] + edited_section
-capture.write_text(capture_text)
-
 # Migrate settings created by older installed builds.
 # Synthesized Codable decoding fails when newer AyuSettings properties are missing;
 # captureDeleted uses try? for this store, which would silently disable automatic History.
