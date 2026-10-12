@@ -248,6 +248,20 @@ jobs:
         working-directory: telegram-ios
         run: python3 "$GITHUB_WORKSPACE/scripts/keep_deleted_messages_in_chat.py"
 
+      - name: Verify deleted-message retention and trash-icon regression
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          capture = Path("submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift").read_text()
+          settings = Path("submodules/AyuGramIOS/Sources/AyuSettings.swift").read_text()
+          status = Path("submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift").read_text()
+          assert "retainDeletedMessagesInChat(transaction: transaction, messages: eligibleMessages)" in capture, "Deleted-message retention hook missing"
+          assert "public var keepDeletedMessagesInChat = true" in settings, "Independent retention setting missing"
+          assert "ayuGramDeletedMessageIcon" in status and "isDeletedRetained" in status, "Trash icon integration missing"
+          print("PASS: retention hook, independent setting, and trash icon are present in the actual AltStore build sources.")
+          PY
+
       - name: Fix binary-output decoding in Telegram build helper
         working-directory: telegram-ios
         run: |
