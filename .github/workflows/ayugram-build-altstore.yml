@@ -270,8 +270,8 @@ jobs:
 
           path = Path("build-system/Make/Make.py")
           source = path.read_text(encoding="utf-8")
-          anchor = "        self.common_args = [\\n"
-          option = "            '--jobs=2',  # Bound concurrent actions on the Intel macOS runner.\\n"
+          anchor = "        self.common_args = [" + chr(10)
+          option = "            '--jobs=2',  # Bound concurrent actions on the Intel macOS runner." + chr(10)
           if option.strip() not in source:
               if anchor not in source:
                   raise SystemExit("Could not locate Bazel common_args in Make.py")
