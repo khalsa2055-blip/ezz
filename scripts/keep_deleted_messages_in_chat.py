@@ -69,7 +69,13 @@ elif new_channel_marker not in state_text:
 state.write_text(state_text, encoding="utf-8")
 
 capture_text = capture.read_text(encoding="utf-8")
-call_anchor = """        let settings = (try? AyuGramRuntime.makeSettingsStore(accountID: accountID))?.settings ?? AyuSettings()
+call_anchor = """        let settingsStore = try? AyuGramRuntime.makeSettingsStore(accountID: accountID)
+        guard settingsStore?.settings.saveDeletedMessages == true else {
+            return
+        }
+
+        var capturesByMessageID: [Int32: [AyuMediaResourceInfo]] = [:]"""
+call_replacement = """        let settings = (try? AyuGramRuntime.makeSettingsStore(accountID: accountID))?.settings ?? AyuSettings()
         if settings.keepDeletedMessagesInChat {
             // Retention is independent from the separate Save Deleted Messages option.
             // Only eligible messages are retained; protected/secret items never enter
@@ -86,7 +92,6 @@ call_anchor = """        let settings = (try? AyuGramRuntime.makeSettingsStore(a
         }
 
         var capturesByMessageID: [Int32: [AyuMediaResourceInfo]] = [:]"""
-call_replacement = call_anchor
 if call_anchor in capture_text:
     capture_text = capture_text.replace(call_anchor, call_replacement, 1)
 elif "Self.retainDeletedMessagesInChat(transaction: transaction" not in capture_text:
