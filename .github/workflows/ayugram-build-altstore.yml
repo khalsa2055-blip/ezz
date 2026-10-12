@@ -262,6 +262,26 @@ jobs:
           p.write_text(s.replace(old, new, 1), encoding="utf-8")
           PY
 
+      - name: Limit Bazel concurrency to avoid runner out-of-memory crashes
+        working-directory: telegram-ios
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build-system/Make/Make.py")
+          source = path.read_text(encoding="utf-8")
+          anchor = "        self.common_args = [\\n"
+          option = "            '--jobs=2',  # Bound concurrent actions on the Intel macOS runner.\\n"
+          if option.strip() not in source:
+              if anchor not in source:
+                  raise SystemExit("Could not locate Bazel common_args in Make.py")
+              source = source.replace(anchor, anchor + option, 1)
+              path.write_text(source, encoding="utf-8")
+          if "            '--jobs=2'" not in path.read_text(encoding="utf-8"):
+              raise SystemExit("Bazel action limit was not applied")
+          print("Bazel action concurrency limited to 2 jobs")
+          PY
+
       - name: Prepare AltStore-compatible device signing material
         working-directory: telegram-ios
         env:
