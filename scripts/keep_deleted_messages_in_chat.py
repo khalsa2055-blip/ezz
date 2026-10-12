@@ -10,6 +10,7 @@ from pathlib import Path
 
 root = Path.cwd()
 capture = root / "submodules/AyuGramIOS/Sources/AyuGramCaptureService.swift"
+settings = root / "submodules/AyuGramIOS/Sources/AyuSettings.swift"
 delete = root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift"
 state = root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift"
 status_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/ChatMessageDateAndStatusNode.swift"
@@ -17,9 +18,20 @@ bubble_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemN
 interactive_file_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageInteractiveFileNode/Sources/ChatMessageInteractiveFileNode.swift"
 interactive_media_ui = root / "submodules/TelegramUI/Components/Chat/ChatMessageInteractiveMediaNode/Sources/ChatMessageInteractiveMediaNode.swift"
 
-for path in (capture, delete, state, status_ui, bubble_ui, interactive_file_ui, interactive_media_ui):
+for path in (capture, settings, delete, state, status_ui, bubble_ui, interactive_file_ui, interactive_media_ui):
     if not path.is_file():
         raise SystemExit(f"Required Telegram/AyuGram source is missing: {path}")
+
+# AyuGram Desktop has a separate keepDeletedMessagesInChat setting. Do not
+# couple in-chat retention to the separate saveDeletedMessages archive toggle.
+settings_text = settings.read_text(encoding="utf-8")
+setting_anchor = "    public var saveDeletedMessages = true\n"
+setting_replacement = setting_anchor + "    public var keepDeletedMessagesInChat = true\n"
+if setting_anchor in settings_text:
+    settings_text = settings_text.replace(setting_anchor, setting_replacement, 1)
+elif "public var keepDeletedMessagesInChat = true" not in settings_text:
+    raise SystemExit("Could not add the independent keep-deleted-in-chat setting.")
+settings.write_text(settings_text, encoding="utf-8")
 
 # Mark text-only messages as eligible too. The capture list is also the
 # explicit allow-list: copy-protected and secret-media messages never enter it.
@@ -57,25 +69,24 @@ elif new_channel_marker not in state_text:
 state.write_text(state_text, encoding="utf-8")
 
 capture_text = capture.read_text(encoding="utf-8")
-call_anchor = """        guard settingsStore?.settings.saveDeletedMessages == true else {
+call_anchor = """        let settings = (try? AyuGramRuntime.makeSettingsStore(accountID: accountID))?.settings ?? AyuSettings()
+        if settings.keepDeletedMessagesInChat {
+            // Retention is independent from the separate Save Deleted Messages option.
+            // Only eligible messages are retained; protected/secret items never enter
+            // mediaCaptures in the caller.
+            let eligibleMessageIDs = Set(mediaCaptures.map(\\.messageID))
+            if !eligibleMessageIDs.isEmpty {
+                let eligibleMessages = messages.filter { eligibleMessageIDs.contains($0.id.id) }
+                Self.retainDeletedMessagesInChat(transaction: transaction, messages: eligibleMessages)
+            }
+        }
+
+        guard settings.saveDeletedMessages else {
             return
         }
 
         var capturesByMessageID: [Int32: [AyuMediaResourceInfo]] = [:]"""
-call_replacement = """        guard settingsStore?.settings.saveDeletedMessages == true else {
-            return
-        }
-
-        // Save a local Postbox row before Telegram removes the server-backed row.
-        // It keeps the original message id out of the server deletion namespace, so
-        // later delete updates cannot remove this local copy.
-        let eligibleMessageIDs = Set(mediaCaptures.map(\\.messageID))
-        if !eligibleMessageIDs.isEmpty {
-            let eligibleMessages = messages.filter { eligibleMessageIDs.contains($0.id.id) }
-            Self.retainDeletedMessagesInChat(transaction: transaction, messages: eligibleMessages)
-        }
-
-        var capturesByMessageID: [Int32: [AyuMediaResourceInfo]] = [:]"""
+call_replacement = call_anchor
 if call_anchor in capture_text:
     capture_text = capture_text.replace(call_anchor, call_replacement, 1)
 elif "Self.retainDeletedMessagesInChat(transaction: transaction" not in capture_text:
@@ -322,6 +333,8 @@ interactive_media_ui.write_text(interactive_media_text, encoding="utf-8")
 # Fail the build early if each message-rendering path is wired to the deleted flag.
 checks = {
     "local namespace clone": "namespace: 1," in capture_text,
+    "independent keep-in-chat setting": "public var keepDeletedMessagesInChat = true" in settings_text,
+    "retention not gated by archive toggle": "if settings.keepDeletedMessagesInChat" in capture_text and "Self.retainDeletedMessagesInChat(transaction: transaction, messages: eligibleMessages)" in capture_text,
     "timestamp status argument uses explicit marker": "isDeletedRetained: item.message.id.namespace == 1 && item.message.globallyUniqueId.map" in bubble_text,
     "Postbox upper history reinjection": "transaction.addMessages([localCopy], location: .UpperHistoryBlock)" in capture_text,
     "persisted retained-message marker": "Self.deletedMessageGlobalId(for: message)" in capture_text and "0xA7ED_DD00_0000_0000" in capture_text,
