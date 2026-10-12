@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - fix/history-production-ui-smoke-no-auto-ipa
+      - deleted-message-trash-icon
     paths:
       - '.github/workflows/ayugram-build-simulator.yml'
       - '.github/history-menu-smoke.py'
