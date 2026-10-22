@@ -490,6 +490,7 @@ jobs:
             --codesigningInformationPath=ci-codesigning \
             --buildNumber=$((100000 + GITHUB_RUN_NUMBER)) \
             --configuration=release_arm64 \
+            --disableExtensions \
             --outputBuildArtifactsPath=ci-artifacts
 
       - name: Verify IPA is for physical iPhone and is signed
@@ -541,17 +542,14 @@ jobs:
 
           app = Path("ci-artifacts/check/Payload").glob("*.app").__next__()
 
-          expected = {
-              "org.ayugram.ezz",
-              "org.ayugram.ezz.BroadcastUpload",
-              "org.ayugram.ezz.SiriIntents",
-              "org.ayugram.ezz.NotificationContent",
-              "org.ayugram.ezz.NotificationService",
-              "org.ayugram.ezz.Share",
-              "org.ayugram.ezz.Widget",
-          }
+          # Free-Apple-ID / iLoader build: compile the main app without app extensions
+          # so it needs only the main App ID instead of seven IDs (app + six extensions).
+          expected = {"org.ayugram.ezz"}
 
-          bundles = [app] + sorted((app / "PlugIns").glob("*.appex"))
+          extensions = sorted((app / "PlugIns").glob("*.appex"))
+          if extensions:
+              raise SystemExit(f"Expected extensions to be disabled, found: {extensions}")
+          bundles = [app]
           seen = set()
 
           for bundle in bundles:
