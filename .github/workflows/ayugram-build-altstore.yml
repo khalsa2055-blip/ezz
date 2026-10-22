@@ -476,6 +476,21 @@ jobs:
           )
           PY
 
+      - name: Enable extension-free device build option
+        working-directory: telegram-ios
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("build-system/Make/Make.py")
+          source = path.read_text()
+          marker = "    add_project_and_build_common_arguments(buildParser)"
+          addition = marker + "\\n    buildParser.add_argument('--disableExtensions', action='store_true', default=False, help='Generate the device project without app extensions.')"
+          if source.count(marker) != 1:
+              raise SystemExit("Could not safely locate build parser to add --disableExtensions")
+          path.write_text(source.replace(marker, addition, 1))
+          PY
+
       - name: Build device IPA
         working-directory: telegram-ios
         run: |
