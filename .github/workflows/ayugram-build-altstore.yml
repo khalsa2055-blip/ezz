@@ -492,7 +492,45 @@ jobs:
             --configuration=release_arm64 \
             --outputBuildArtifactsPath=ci-artifacts
 
-      - name: Verify IPA is for physical iPhone and is signed
+      - name: Remove app extensions to reduce iLoader App ID usage
+        working-directory: telegram-ios
+        run: |
+          set -euo pipefail
+
+          stage="$PWD/ci-artifacts/iloader-stage"
+          output="$PWD/ci-artifacts/Telegram-iLoader.ipa"
+          rm -rf "$stage" "$output"
+          mkdir -p "$stage"
+          unzip -q -o ci-artifacts/Telegram.ipa -d "$stage"
+
+          app=$(find "$stage/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = "org.ayugram.ezz"
+
+          extension_count=0
+          if [ -d "$app/PlugIns" ]; then
+            extension_count=$(find "$app/PlugIns" -mindepth 1 -maxdepth 1 -type d -name '*.appex' | wc -l | tr -d ' ')
+            rm -rf "$app/PlugIns"
+          fi
+
+          leftovers=$(find "$app" -type d -name '*.appex' -print)
+          if [ -n "$leftovers" ]; then
+            echo "::error::App extensions remain after stripping:"
+            echo "$leftovers"
+            exit 1
+          fi
+
+          echo "Removed $extension_count embedded .appex bundles."
+          echo "iLoader should now need one App ID for the main app; extension features are omitted."
+
+          # iLoader re-signs the extracted bundle with the user's own Apple Developer account.
+          # Repackage only the Payload directory, preserving the standard IPA layout.
+          (cd "$stage" && /usr/bin/zip -qry "$output" Payload)
+          mv "$output" ci-artifacts/Telegram.ipa
+          rm -rf "$stage"
+          ls -lh ci-artifacts/Telegram.ipa
+
+      - name: Verify reduced-extension IPA for iLoader
         working-directory: telegram-ios
         run: |
           set -euo pipefail
@@ -531,8 +569,14 @@ jobs:
             exit 1
           fi
 
-          codesign --verify --deep --strict "$app"
+          # The IPA was modified to remove embedded extensions; iLoader will re-sign it.
+          # Verify the main app profile can still be decoded, then verify no extension IDs remain.
           security cms -D -i "$app/embedded.mobileprovision" >/dev/null
+          if [ -d "$app/PlugIns" ] && find "$app/PlugIns" -mindepth 1 -maxdepth 1 -type d -name '*.appex' | grep -q .; then
+            echo "::error::Embedded app extensions remain in iLoader IPA."
+            exit 1
+          fi
+          echo "Verified: arm64 iPhone app, main bundle ID org.ayugram.ezz, and no embedded app extensions."
 
           rm -rf ci-artifacts/check
 
