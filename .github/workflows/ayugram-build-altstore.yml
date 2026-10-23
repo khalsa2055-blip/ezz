@@ -534,8 +534,6 @@ jobs:
           codesign --verify --deep --strict "$app"
           security cms -D -i "$app/embedded.mobileprovision" >/dev/null
 
-          PY
-
           rm -rf ci-artifacts/check
 
           mv ci-artifacts/Telegram.ipa ci-artifacts/AyuGram-AltStore.ipa
