@@ -72,11 +72,11 @@ jobs:
 
       - name: Validate required Telegram API secrets
         env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID || secrets.API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH || secrets.API_HASH }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
-          test -n "$TELEGRAM_API_ID" || { echo "Missing repository secret TELEGRAM_API_ID (or API_ID)"; exit 1; }
-          test -n "$TELEGRAM_API_HASH" || { echo "Missing repository secret TELEGRAM_API_HASH (or API_HASH)"; exit 1; }
+          test -n "$TELEGRAM_API_ID" || { echo "Missing repository secret TELEGRAM_API_ID"; exit 1; }
+          test -n "$TELEGRAM_API_HASH" || { echo "Missing repository secret TELEGRAM_API_HASH"; exit 1; }
           case "$TELEGRAM_API_ID" in
             *[!0-9]*) echo "TELEGRAM_API_ID must be numeric"; exit 1 ;;
           esac
@@ -408,8 +408,8 @@ jobs:
       - name: Create device build configuration
         working-directory: telegram-ios
         env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID || secrets.API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH || secrets.API_HASH }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TEAM_ID: ${{ env.TEAM_ID }}
         run: |
           python3 - <<'PY'
