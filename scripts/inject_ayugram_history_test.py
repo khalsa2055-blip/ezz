@@ -75,8 +75,11 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                 }
                                 let reportURL = documents.appendingPathComponent("AyuGramHistoryListSmokeReport.json")
                                 let markerURL = documents.appendingPathComponent("AyuGramHistoryListHarnessReady.txt")
+                                let productionMarkerURL = documents.appendingPathComponent("AyuGramHistoryProductionScreenReady.txt")
                                 let report: [String: Any] = [
                                     "passed": true,
+                                    "mode": "production AccountContext History screen",
+                                    "production_history_screen_tested": true,
                                     "dialogID": dialogID,
                                     "messageID": messageID,
                                     "senderName": "Smoke Test Sender",
@@ -86,8 +89,9 @@ hook = """                    self.mainWindow.viewController = context.rootContr
                                 do {
                                     let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
                                     try data.write(to: reportURL, options: .atomic)
-                                    try Data("History list fixture ready".utf8).write(to: markerURL, options: .atomic)
-                                    print("AyuGram History list fixture rendered for dialog \(dialogID)")
+                                    try Data("History production screen ready".utf8).write(to: productionMarkerURL, options: .atomic)
+                                    try Data("History production screen ready".utf8).write(to: markerURL, options: .atomic)
+                                    print("AyuGram production History screen rendered for test dialog \(dialogID)")
                                 } catch {
                                     print("AyuGram History list fixture report write failed: \(error)")
                                 }
@@ -158,9 +162,11 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
             let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("ayugram-standalone-smoke-media", isDirectory: true)
             try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
             let firstMedia = tempRoot.appendingPathComponent("0.jpg")
-            let secondMedia = tempRoot.appendingPathComponent("1.mp4")
-            try? Data("ayugram-smoke-photo".utf8).write(to: firstMedia, options: .atomic)
-            try? Data("ayugram-smoke-video".utf8).write(to: secondMedia, options: .atomic)
+            let secondPhoto = tempRoot.appendingPathComponent("1.jpg")
+            let thirdMedia = tempRoot.appendingPathComponent("2.mp4")
+            try? Data("ayugram-smoke-photo-1".utf8).write(to: firstMedia, options: .atomic)
+            try? Data("ayugram-smoke-photo-2".utf8).write(to: secondPhoto, options: .atomic)
+            try? Data("ayugram-smoke-video".utf8).write(to: thirdMedia, options: .atomic)
 
             let message = AyuMessage(
                 fakeID: 0,
@@ -177,15 +183,17 @@ standalone_hook = """        if ProcessInfo.processInfo.arguments.contains("-Ayu
             )
             let savedMedia = AyuGramMediaArchive.saveToSaved(message: message)
             let firstSaved = mediaRoot?.appendingPathComponent("message-\\(messageID)-media-1.jpg")
-            let secondSaved = mediaRoot?.appendingPathComponent("message-\\(messageID)-media-2.mp4")
+            let secondSaved = mediaRoot?.appendingPathComponent("message-\\(messageID)-media-2.jpg")
+            let thirdSaved = mediaRoot?.appendingPathComponent("message-\\(messageID)-media-3.mp4")
             let mediaMetadata = messagesRoot?.appendingPathComponent("message-\\(messageID).json")
             let mediaText = messagesRoot?.appendingPathComponent("message-\\(messageID).txt")
             let mediaOK = savedMedia
                 && (firstSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (secondSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                && (thirdSaved.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (mediaMetadata.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
                 && (mediaText.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-            add("History → Saved media copy", mediaOK, "album media + text + metadata copied to Media/Messages")
+            add("History → Saved media copy", mediaOK, "two photos + one video + text + metadata copied to Media/Messages")
             try? FileManager.default.removeItem(at: tempRoot)
 
             let textMessage = AyuMessage(

@@ -300,6 +300,12 @@ if "AyuGramHistoryHarnessController(), on: .root" not in s:
                 guard let self else {
                     return
                 }
+                let productionMarker = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+                    .appendingPathComponent("AyuGramHistoryProductionScreenReady.txt")
+                if let productionMarker, FileManager.default.fileExists(atPath: productionMarker.path) {
+                    print("AyuGram History production screen rendered; skipping the synthetic overlay.")
+                    return
+                }
                 let availableScenes = UIApplication.shared.connectedScenes
                     .compactMap { $0 as? UIWindowScene }
                 let scene = self.nativeWindow?.windowScene

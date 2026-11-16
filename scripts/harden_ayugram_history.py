@@ -286,6 +286,221 @@ if "ayuAccountID: accountPeerId.toInt64()" not in delete_event_block:
     raise SystemExit("Automatic History is not enabled for server-delivered deleted-message updates")
 print("Verified automatic History receives account ID on Telegram's server-delivered DeleteMessages path.")
 
+# Megagroups/channels use updateDeleteChannelMessages rather than the generic
+# DeleteMessages event. Capture accepted channel deletions in a Postbox transaction
+# BEFORE finalStateWithUpdatesAndServerTime applies its pending message deletions.
+# The baseline performs this work in finalStateWithUpdatesAndServerTime, while the
+# outer finalStateWithUpdates function is the last point where we can safely await a
+# Postbox transaction and still preserve the existing pts-continuity rules.
+if "private func ayuCaptureDeletedChannelMessages(" not in state_utils_text:
+    if "import AyuGramIOS\n" not in state_utils_text:
+        import_anchor = "import TelegramApi\n"
+        if import_anchor not in state_utils_text:
+            raise SystemExit("AyuGram channel History import anchor not found")
+        state_utils_text = state_utils_text.replace(import_anchor, import_anchor + "import AyuGramIOS\n", 1)
+
+    channel_capture_helper = r'''private func ayuCaptureDeletedChannelMessages(
+    transaction: Transaction,
+    mediaBox: MediaBox,
+    ids: [MessageId],
+    accountID: Int64
+) {
+    let messages = ids.compactMap { transaction.getMessage($0) }
+    guard !messages.isEmpty else {
+        return
+    }
+
+    var mediaCaptures: [AyuMessageMediaCapture] = []
+    var senderNames: [Int32: String] = [:]
+    for message in messages {
+        if let author = message.author {
+            let name: String?
+            if let user = author as? TelegramUser {
+                let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+                name = parts.isEmpty ? nil : parts.joined(separator: " ")
+            } else if let channel = author as? TelegramChannel {
+                name = channel.title
+            } else if let group = author as? TelegramGroup {
+                name = group.title
+            } else {
+                name = nil
+            }
+            if let name, !name.isEmpty {
+                senderNames[message.id.id] = name
+            }
+        }
+
+        // Text remains in History even when Telegram protects the media itself.
+        guard !message.isCopyProtected(), !message.containsSecretMedia else {
+            continue
+        }
+        var resources: [AyuMediaResourceInfo] = []
+        for media in message.effectiveMedia {
+            if let image = media as? TelegramMediaImage {
+                let completedRepresentations = image.representations.filter {
+                    mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: "jpg") != nil
+                }
+                let candidates = completedRepresentations.isEmpty ? image.representations : completedRepresentations
+                if let representation = candidates.max(by: {
+                    Int64($0.dimensions.width) * Int64($0.dimensions.height)
+                        < Int64($1.dimensions.width) * Int64($1.dimensions.height)
+                }) {
+                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
+                }
+            } else if let file = media as? TelegramMediaFile {
+                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
+            }
+        }
+        var seenResources = Set<String>()
+        resources = resources.filter { seenResources.insert($0.id).inserted }
+        if !resources.isEmpty {
+            mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))
+        }
+    }
+
+    AyuGramCaptureService.captureDeleted(
+        transaction: transaction,
+        mediaBox: mediaBox,
+        messages: messages,
+        mediaCaptures: mediaCaptures,
+        accountID: accountID,
+        senderNames: senderNames
+    )
+}
+
+'''
+    helper_anchor = "func initialStateWithUpdateGroups(postbox: Postbox, groups: [UpdateGroup]) -> Signal<AccountMutableState, NoError> {"
+    if helper_anchor not in state_utils_text:
+        raise SystemExit("Channel History helper insertion anchor not found")
+    state_utils_text = state_utils_text.replace(helper_anchor, channel_capture_helper + helper_anchor, 1)
+
+# Do not inject into finalStateWithUpdateGroups: that function only collects updates
+# and does not apply updateDeleteChannelMessages. Use the actual wrapper that awaits
+# server time and can sequence a Postbox capture before invoking the deletion engine.
+outer_start_marker = "private func finalStateWithUpdates(accountPeerId:"
+outer_start = state_utils_text.find(outer_start_marker)
+outer_end = state_utils_text.find("\nprivate func finalStateWithUpdatesAndServerTime(", outer_start)
+if outer_start < 0 or outer_end < 0:
+    raise SystemExit("Could not locate finalStateWithUpdates wrapper for channel History")
+outer_fn = state_utils_text[outer_start:outer_end]
+old_return_pattern = r"""    return network\.currentGlobalTime
+    \|> take\(1\)
+    \|> mapToSignal \{ serverTime -> Signal<AccountFinalState, NoError> in
+        return finalStateWithUpdatesAndServerTime\(accountPeerId: accountPeerId, postbox: postbox, network: network, state: state, updates: updates, shouldPoll: shouldPoll, missingUpdates: missingUpdates, shouldResetChannels: shouldResetChannels, updatesDate: updatesDate, serverTime: Int32\(serverTime\), asyncResetChannels: asyncResetChannels\)
+    \}"""
+new_return = r'''    return network.currentGlobalTime
+    |> take(1)
+    |> mapToSignal { serverTime -> Signal<AccountFinalState, NoError> in
+        // Mirror finalStateWithUpdatesAndServerTime's accepted pts progression,
+        // collecting only channel deletions that it will actually apply.
+        var channelPts: [PeerId: Int32] = [:]
+        for (peerId, channelState) in state.channelStates {
+            channelPts[peerId] = channelState.pts
+        }
+        var deletedChannelMessageIds: [MessageId] = []
+        func advanceChannelPts(_ peerId: PeerId, pts: Int32, ptsCount: Int32) -> Bool {
+            guard let previousPts = channelPts[peerId] else {
+                return false
+            }
+            if previousPts >= pts {
+                return false
+            }
+            guard previousPts + ptsCount == pts else {
+                return false
+            }
+            channelPts[peerId] = pts
+            return true
+        }
+
+        // Match Telegram's channel pts progression, not just deletion updates.
+        // A new/edit/web-page/pinned update can advance pts earlier in the same batch;
+        // ignoring it makes the following valid delete look like a pts hole and loses
+        // History rows for otherwise accepted deletions.
+        for update in sortedUpdates(updates) {
+            switch update {
+            case let .updateDeleteChannelMessages(data):
+                let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(data.channelId))
+                if advanceChannelPts(peerId, pts: data.pts, ptsCount: data.ptsCount) {
+                    deletedChannelMessageIds.append(contentsOf: data.messages.map {
+                        MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0)
+                    })
+                }
+            case let .updateEditChannelMessage(data):
+                let apiMessage = data.message
+                var peerIsForum = false
+                if let peerId = apiMessage.peerId {
+                    peerIsForum = state.isPeerForum(peerId: peerId)
+                }
+                if let message = StoreMessage(apiMessage: apiMessage, accountPeerId: accountPeerId, peerIsForum: peerIsForum),
+                   case let .Id(messageId) = message.id {
+                    _ = advanceChannelPts(messageId.peerId, pts: data.pts, ptsCount: data.ptsCount)
+                }
+            case let .updateNewChannelMessage(data):
+                let apiMessage = data.message
+                var peerIsForum = false
+                if let peerId = apiMessage.peerId {
+                    peerIsForum = state.isPeerForum(peerId: peerId)
+                }
+                if let message = StoreMessage(apiMessage: apiMessage, accountPeerId: accountPeerId, peerIsForum: peerIsForum) {
+                    _ = advanceChannelPts(message.id.peerId, pts: data.pts, ptsCount: data.ptsCount)
+                }
+            case let .updateChannelWebPage(data):
+                let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(data.channelId))
+                _ = advanceChannelPts(peerId, pts: data.pts, ptsCount: data.ptsCount)
+            case let .updatePinnedChannelMessages(data):
+                let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(data.channelId))
+                _ = advanceChannelPts(peerId, pts: data.pts, ptsCount: data.ptsCount)
+            default:
+                break
+            }
+        }
+
+        let finishState: () -> Signal<AccountFinalState, NoError> = {
+            return finalStateWithUpdatesAndServerTime(accountPeerId: accountPeerId, postbox: postbox, network: network, state: state, updates: updates, shouldPoll: shouldPoll, missingUpdates: missingUpdates, shouldResetChannels: shouldResetChannels, updatesDate: updatesDate, serverTime: Int32(serverTime), asyncResetChannels: asyncResetChannels)
+        }
+        var uniqueIds = Set<MessageId>()
+        let acceptedIds = deletedChannelMessageIds.filter { uniqueIds.insert($0).inserted }
+        guard !acceptedIds.isEmpty else {
+            return finishState()
+        }
+        return postbox.transaction { transaction -> Void in
+            ayuCaptureDeletedChannelMessages(
+                transaction: transaction,
+                mediaBox: postbox.mediaBox,
+                ids: acceptedIds,
+                accountID: accountPeerId.toInt64()
+            )
+        }
+        |> mapToSignal { _ in
+            return finishState()
+        }
+    }'''
+updated_outer_fn, count = re.subn(old_return_pattern, new_return, outer_fn, count=1)
+if count != 1:
+    raise SystemExit("Could not replace the exact finalStateWithUpdates wrapper return")
+state_utils_text = state_utils_text[:outer_start] + updated_outer_fn + state_utils_text[outer_end:]
+if "ayuCaptureDeletedChannelMessages(" not in state_utils_text or "let acceptedIds = deletedChannelMessageIds.filter" not in state_utils_text:
+    raise SystemExit("Channel-group History pre-delete capture integration is incomplete")
+# Regression guard: the capture simulation must account for all channel update
+# types that advance pts before a deletion in the same update batch.
+for required_pts_update in [
+    "func advanceChannelPts",
+    "case let .updateDeleteChannelMessages(data)",
+    "case let .updateEditChannelMessage(data)",
+    "case let .updateNewChannelMessage(data)",
+    "case let .updateChannelWebPage(data)",
+    "case let .updatePinnedChannelMessages(data)",
+]:
+    if required_pts_update not in updated_outer_fn:
+        raise SystemExit(f"Channel History pts simulation missing {required_pts_update}")
+state_utils.write_text(state_utils_text)
+
+# Keep the patch script's acceptance check aligned with the true Telegram baseline.
+if "updatedState.deleteMessages(messages.map({ MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) }))" not in state_utils_text:
+    raise SystemExit("Telegram channel deletion apply path was not found")
+if "accountID: accountPeerId.toInt64()" not in updated_outer_fn:
+    raise SystemExit("Channel History capture does not pass the active Telegram account ID")
+
 for required in [
     "AyuGram Save",
     "AyuGram Transfer to Saved Messages",
@@ -562,7 +777,19 @@ private final class AyuHistoryBubbleItem: ListViewItem {
     }
 
     var approximateHeight: CGFloat {
-        return self.message.mediaPath == nil ? 92.0 : 230.0
+        let hasMedia = AyuGramMediaArchive.isArchivedFile(self.message.mediaPath)
+        let estimateRect = (self.displayText as NSString).boundingRect(
+            with: CGSize(width: 180.0, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: UIFont.systemFont(ofSize: 16.0)],
+            context: nil
+        )
+        let bodyHeight = self.displayText.isEmpty && hasMedia ? 0.0 : max(20.0, ceil(estimateRect.height))
+        let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
+        let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
+        // Keep ListView's estimate close to the real node layout, including the
+        // two-line Sent/Deleted timestamp footer, so rows aren't clipped or jumped.
+        return 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 36.0 + 8.0
     }
 
     func nodeConfiguredForParams(
@@ -630,6 +857,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
         self.bodyLabel.numberOfLines = 0
         self.timeLabel.font = UIFont.systemFont(ofSize: 11.0)
         self.timeLabel.textAlignment = .left
+        self.timeLabel.numberOfLines = 2
         self.mediaView.layer.cornerRadius = 12.0
         self.mediaView.layer.masksToBounds = true
         self.mediaView.contentMode = .scaleAspectFill
@@ -673,40 +901,24 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
             let bodyHeight = item.displayText.isEmpty && hasMedia ? 0.0 : max(20.0, ceil(bodyRect.height))
             let mediaHeight: CGFloat = hasMedia ? 165.0 : 0.0
             let mediaGap: CGFloat = hasMedia ? 10.0 : 0.0
-            let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 24.0 + 8.0
+            let contentHeight = 12.0 + 18.0 + 4.0 + 16.0 + 8.0 + bodyHeight + mediaGap + mediaHeight + 6.0 + 36.0 + 8.0
             let layout = ListViewItemNodeLayout(
                 contentSize: CGSize(width: params.width, height: contentHeight),
                 insets: UIEdgeInsets(top: 4.0, left: 0.0, bottom: 4.0, right: 0.0)
             )
             return (layout, {
                 self.item = item
-                self.view.backgroundColor = UIColor { trait in
-                    if trait.userInterfaceStyle == .dark {
-                        return UIColor(red: 0.07, green: 0.08, blue: 0.09, alpha: 1.0)
-                    }
-                    return UIColor(red: 0.92, green: 0.94, blue: 0.96, alpha: 1.0)
-                }
-                self.bubbleView.backgroundColor = UIColor { trait in
-                    if outgoing {
-                        if trait.userInterfaceStyle == .dark {
-                            return UIColor(red: 0.13, green: 0.25, blue: 0.34, alpha: 1.0)
-                        }
-                        return UIColor(red: 0.84, green: 0.93, blue: 1.0, alpha: 1.0)
-                    }
-                    if trait.userInterfaceStyle == .dark {
-                        return UIColor(red: 0.14, green: 0.16, blue: 0.18, alpha: 1.0)
-                    }
-                    return UIColor.white
-                }
-                self.senderLabel.textColor = UIColor { trait in
-                    if trait.userInterfaceStyle == .dark {
-                        return UIColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1.0)
-                    }
-                    return UIColor(red: 0.10, green: 0.42, blue: 0.73, alpha: 1.0)
-                }
-                self.kindLabel.textColor = item.message.isDeleted ? UIColor.systemRed : UIColor.systemOrange
-                self.bodyLabel.textColor = UIColor.label
-                self.timeLabel.textColor = UIColor.secondaryLabel
+                // Use Telegram's own theme palette (the same incoming/outgoing
+                // bubble colors used by ChatMessageBubbleItemNode) instead of a
+                // separately invented AyuGram color palette.
+                let theme = item.presentationData.theme
+                let messageTheme = outgoing ? theme.chat.message.outgoing : theme.chat.message.incoming
+                self.view.backgroundColor = theme.list.plainBackgroundColor
+                self.bubbleView.backgroundColor = messageTheme.bubble.withoutWallpaper.fill.first ?? theme.list.plainBackgroundColor
+                self.senderLabel.textColor = messageTheme.accentTextColor
+                self.kindLabel.textColor = item.message.isDeleted ? UIColor.systemRed : messageTheme.accentTextColor
+                self.bodyLabel.textColor = messageTheme.primaryTextColor
+                self.timeLabel.textColor = messageTheme.secondaryTextColor
                 self.senderLabel.text = item.senderName.isEmpty ? "Unknown sender" : item.senderName
                 self.kindLabel.text = item.displayKind
                 self.bodyLabel.text = item.displayText
@@ -731,7 +943,7 @@ private final class AyuHistoryBubbleItemNode: ListViewItemNode {
 
                 let footerY = hasMedia ? 49.0 + bodyHeight + 10.0 + mediaHeight + 6.0 : 49.0 + bodyHeight + 6.0
                 self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)
-                self.saveButton.frame = CGRect(x: bubbleWidth - 38.0, y: footerY - 5.0, width: 30.0, height: 30.0)
+                self.saveButton.frame = CGRect(x: bubbleWidth - 38.0, y: footerY + 1.0, width: 30.0, height: 30.0)
             })
         }
     }
@@ -892,7 +1104,48 @@ if '.appendingPathComponent("saved", isDirectory: true)' not in archive_text:
 
 # Add a runtime smoke test proving a media copy really reaches the Saved folder.
 smoke_text = smoke.read_text()
+
+# Regression test the production Postbox write path: these fields were present
+# in the capture snapshot but lost when appendDeleted rebuilt the stored row.
+if 'fromName: "History Smoke Sender"' not in smoke_text:
+    create_anchor = '            let deleted = AyuMessage(\n'
+    if create_anchor not in smoke_text:
+        raise SystemExit("History metadata smoke-test message constructor not found")
+    smoke_text = smoke_text.replace(
+        create_anchor,
+        '            let deletionTimestamp = Int32(Date().timeIntervalSince1970) - 25\n' + create_anchor,
+        1,
+    )
+    deleted_sender_anchor = '                fromID: accountID,\n                messageID: messageIDBase,\n'
+    if deleted_sender_anchor not in smoke_text:
+        raise SystemExit("History metadata smoke-test sender anchor not found")
+    smoke_text = smoke_text.replace(
+        deleted_sender_anchor,
+        '                fromID: accountID,\n                fromName: "History Smoke Sender",\n                messageID: messageIDBase,\n',
+        1,
+    )
+    deleted_timestamp_anchor = '                isDeleted: true\n            )\n            let edited = AyuMessage('
+    if deleted_timestamp_anchor not in smoke_text:
+        raise SystemExit("History metadata smoke-test deletion timestamp anchor not found")
+    smoke_text = smoke_text.replace(
+        deleted_timestamp_anchor,
+        '                isDeleted: true,\n                deletedAt: deletionTimestamp\n            )\n            let edited = AyuMessage(',
+        1,
+    )
+    old_deleted_assertion = '            let deletedHit = deletedRows.contains { $0.text == deleted.text && $0.isDeleted }'
+    new_deleted_assertion = '            let deletedHit = deletedRows.contains { $0.text == deleted.text && $0.isDeleted && $0.fromName == "History Smoke Sender" && $0.deletedAt == deletionTimestamp }'
+    if old_deleted_assertion not in smoke_text:
+        raise SystemExit("History metadata smoke-test assertion anchor not found")
+    smoke_text = smoke_text.replace(old_deleted_assertion, new_deleted_assertion, 1)
+    smoke_text = smoke_text.replace(
+        '            return (ok, ok ? "deleted, edited and media metadata round-tripped through Postbox" : "history round-trip mismatch")',
+        '            return (ok, ok ? "sender name, exact deletion timestamp, edits and media round-tripped through Postbox" : "history round-trip mismatch (sender/deletion metadata included)")',
+        1,
+    )
+    smoke.write_text(smoke_text)
+
 anchor = '        add("history display labels") {'
+
 if anchor not in smoke_text:
     raise SystemExit("Smoke test saved-copy anchor missing")
 if 'add("History → Saved copy")' not in smoke_text:
@@ -960,6 +1213,78 @@ message_text = message_text.replace(
 )
 message.write_text(message_text)
 
+# 1b) Preserve the sender/deletion metadata when snapshots become durable Postbox rows.
+# This is the production storage boundary used by the History screen; adding the fields
+# to AyuMessage alone is not enough because the old constructor silently dropped them.
+store_text = store.read_text()
+old_store_row = """                fromID: snapshot.fromID,
+                topicID: snapshot.topicID,
+                messageID: snapshot.messageID,
+                date: snapshot.date,
+                editDate: snapshot.editDate,
+                text: snapshot.text,
+                mediaPath: snapshot.mediaPath,
+                mimeType: snapshot.mimeType,
+                isDeleted: deleted
+"""
+new_store_row = """                fromID: snapshot.fromID,
+                fromName: snapshot.fromName,
+                topicID: snapshot.topicID,
+                messageID: snapshot.messageID,
+                date: snapshot.date,
+                editDate: snapshot.editDate,
+                text: snapshot.text,
+                mediaPath: snapshot.mediaPath,
+                mimeType: snapshot.mimeType,
+                isDeleted: deleted,
+                deletedAt: snapshot.deletedAt ?? (deleted ? Int32(Date().timeIntervalSince1970) : nil)
+"""
+if old_store_row in store_text:
+    store_text = store_text.replace(old_store_row, new_store_row, 1)
+elif not (
+    "fromName: snapshot.fromName," in store_text
+    and "deletedAt: snapshot.deletedAt ?? (deleted ? Int32(Date().timeIntervalSince1970) : nil)" in store_text
+):
+    raise SystemExit("Postbox History row constructor does not preserve sender/deletion metadata")
+store.write_text(store_text)
+
+# Keep the open History conversation in sync when a new delete/edit is committed.
+# The list initially loads from Postbox, then reloads only for the active account
+# when the durable History store changes.
+store_text = store.read_text()
+notification_decl_old = """public enum AyuGramPostboxHistoryStore {
+    private static let key = ValueBoxKey("ayugram.messageHistory.v1")"""
+notification_decl_new = """public enum AyuGramPostboxHistoryStore {
+    public static let didChangeNotification = Notification.Name("AyuGramHistoryStoreDidChange")
+    private static let key = ValueBoxKey("ayugram.messageHistory.v1")"""
+if notification_decl_old in store_text:
+    store_text = store_text.replace(notification_decl_old, notification_decl_new, 1)
+elif 'public static let didChangeNotification = Notification.Name("AyuGramHistoryStoreDidChange")' not in store_text:
+    raise SystemExit("History change notification declaration anchor missing")
+
+notification_append_old = """        transaction.setPreferencesEntry(key: key, value: PreferencesEntry(state))
+        return stored
+    }
+
+    private static func read(transaction: Transaction) -> AyuPostboxHistoryState {"""
+notification_append_new = """        transaction.setPreferencesEntry(key: key, value: PreferencesEntry(state))
+        if let accountID = snapshots.first?.userID {
+            NotificationCenter.default.post(
+                name: didChangeNotification,
+                object: nil,
+                userInfo: ["accountID": accountID]
+            )
+        }
+        return stored
+    }
+
+    private static func read(transaction: Transaction) -> AyuPostboxHistoryState {"""
+if notification_append_old in store_text:
+    store_text = store_text.replace(notification_append_old, notification_append_new, 1)
+elif "name: didChangeNotification" not in store_text:
+    raise SystemExit("History change notification append anchor missing")
+store.write_text(store_text)
+
 # 2) Snapshot bridge: automatically timestamp deletion events and retain sender name.
 bridge_text = (root / "submodules/AyuGramIOS/Sources/AyuGramPostboxBridge.swift").read_text()
 if "fromName: String? = nil" not in bridge_text:
@@ -1005,15 +1330,15 @@ delete_paths = [
     root / "submodules/TelegramCore/Sources/TelegramEngine/Messages/DeleteMessages.swift",
     root / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift",
 ]
-# Automatic History media: capture one largest photo representation per image,
-# while retaining videos/files as individual resources. This avoids storing
-# thumbnails and alternate photo sizes redundantly.
+# Automatic History media: prefer the largest photo rendition already complete
+# in MediaBox, falling back to the largest known rendition only if none is complete.
+# This preserves thumbnails/previews when the full-size file was never downloaded.
 automatic_media_old = "                if let image = media as? TelegramMediaImage {\n                    for representation in image.representations.sorted(by: {\n                        Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                            > Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                    }) {\n                        resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                    }\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
-automatic_media_new = "                if let image = media as? TelegramMediaImage,\n                   let representation = image.representations.max(by: {\n                       Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                           < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                   }) {\n                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
+automatic_media_new = "                if let image = media as? TelegramMediaImage {\n                    let completedRepresentations = image.representations.filter {\n                        mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: \"jpg\") != nil\n                    }\n                    let candidates = completedRepresentations.isEmpty ? image.representations : completedRepresentations\n                    if let representation = candidates.max(by: {\n                        Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                            < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                    }) {\n                        resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                    }\n                } else if let file = media as? TelegramMediaFile {\n                    resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                }"
 
 # Exact indentation used by the edit-history hook.
 automatic_media_old_edited = "                            if let image = media as? TelegramMediaImage {\n                                for representation in image.representations.sorted(by: {\n                                    Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                        > Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                                }) {\n                                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                                }\n                            } else if let file = media as? TelegramMediaFile {\n                                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                            }"
-automatic_media_new_edited = "                            if let image = media as? TelegramMediaImage,\n                               let representation = image.representations.max(by: {\n                                   Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                       < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                               }) {\n                                resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                            } else if let file = media as? TelegramMediaFile {\n                                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                            }"
+automatic_media_new_edited = "                            if let image = media as? TelegramMediaImage {\n                                let completedRepresentations = image.representations.filter {\n                                    mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: \"jpg\") != nil\n                                }\n                                let candidates = completedRepresentations.isEmpty ? image.representations : completedRepresentations\n                                if let representation = candidates.max(by: {\n                                    Int64($0.dimensions.width) * Int64($0.dimensions.height)\n                                        < Int64($1.dimensions.width) * Int64($1.dimensions.height)\n                                }) {\n                                    resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: \"image/jpeg\"))\n                                }\n                            } else if let file = media as? TelegramMediaFile {\n                                resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))\n                            }"
 for delete_file in delete_paths:
     if not delete_file.exists():
         continue
@@ -1067,6 +1392,15 @@ for delete_file in delete_paths:
         elif "AyuMediaResourceInfo" in d and "TelegramMediaImage" in d and "TelegramMediaFile" in d and "for representation in image.representations.sorted" in d:
             raise SystemExit(f"Automatic History photo capture anchor missing in {delete_file}")
         delete_file.write_text(d)
+
+# Verify every production deletion capture path prefers a complete image rendition.
+for deletion_source in delete_paths:
+    if not deletion_source.exists():
+        continue
+    source_text = deletion_source.read_text()
+    if 'mediaBox.completedResourcePath(id: $0.resource.id, pathExtension: "jpg")' not in source_text:
+        raise SystemExit(f"Automatic History does not prefer completed photo renditions in {deletion_source}")
+print("Automatic History photo capture now prefers the largest completed rendition.")
 
 # 5) Manual AyuGram Save: retain sender name and local media even when Telegram's
 # own Save/Forward action is unavailable. It still depends on media being locally available.
@@ -1316,6 +1650,128 @@ if "let bubbleWidth = " not in u or "AyuHistoryBubbleItemNode" not in u:
 if "import AVFoundation" not in u:
     u = u.replace("import UIKit\n", "import UIKit\nimport AVFoundation\n", 1)
 
+# Backfill names for older History rows created before senderName was persisted.
+# Telegram's Postbox still has the peer cache in many cases, so resolve the sender
+# by the encoded PeerId rather than showing an anonymous placeholder.
+if "import TelegramCore" not in u:
+    u = u.replace("import Postbox\n", "import Postbox\nimport TelegramCore\n", 1)
+
+old_history_query = """        context.account.postbox.transaction { transaction in
+            AyuGramPostboxHistoryStore.filtered(
+                transaction: transaction,
+                userID: accountID,
+                dialogID: dialogID,
+                kind: .all,
+                limit: 500
+            )
+        }"""
+new_history_query = """        context.account.postbox.transaction { transaction in
+            let rows = AyuGramPostboxHistoryStore.filtered(
+                transaction: transaction,
+                userID: accountID,
+                dialogID: dialogID,
+                kind: .all,
+                limit: 500
+            )
+            return rows.map { message in
+                if let savedName = message.fromName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !savedName.isEmpty {
+                    return message
+                }
+                guard message.fromID != 0,
+                      let author = transaction.getPeer(PeerId(message.fromID)) else {
+                    return message
+                }
+                let resolvedName: String?
+                if let user = author as? TelegramUser {
+                    let parts = [user.firstName, user.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+                    resolvedName = parts.isEmpty ? nil : parts.joined(separator: " ")
+                } else if let channel = author as? TelegramChannel {
+                    resolvedName = channel.title
+                } else if let group = author as? TelegramGroup {
+                    resolvedName = group.title
+                } else {
+                    resolvedName = nil
+                }
+                guard let resolvedName, !resolvedName.isEmpty else {
+                    return message
+                }
+                return AyuMessage(
+                    fakeID: message.fakeID,
+                    userID: message.userID,
+                    dialogID: message.dialogID,
+                    peerID: message.peerID,
+                    fromID: message.fromID,
+                    fromName: resolvedName,
+                    topicID: message.topicID,
+                    messageID: message.messageID,
+                    date: message.date,
+                    editDate: message.editDate,
+                    text: message.text,
+                    mediaPath: message.mediaPath,
+                    mimeType: message.mimeType,
+                    isDeleted: message.isDeleted,
+                    deletedAt: message.deletedAt
+                )
+            }
+        }"""
+if old_history_query in u:
+    u = u.replace(old_history_query, new_history_query, 1)
+elif "transaction.getPeer(PeerId(message.fromID))" not in u:
+    raise SystemExit("History sender-name lookup query anchor not found")
+
+# Use a real change signal instead of a one-shot Postbox transaction. This keeps
+# the History list itself live: a newly captured message appears without leaving
+# and reopening the screen. The initial event still loads existing persisted rows.
+history_signal_start = """    let signal = combineLatest(
+        context.sharedContext.presentationData,
+        context.account.postbox.transaction { transaction in"""
+history_signal_start_new = """    let historyChanges: Signal<Void, NoError> = Signal { subscriber in
+        let observer = NotificationCenter.default.addObserver(
+            forName: AyuGramPostboxHistoryStore.didChangeNotification,
+            object: nil,
+            queue: nil
+        ) { notification in
+            guard let changedAccountID = notification.userInfo?["accountID"] as? Int64,
+                  changedAccountID == accountID else {
+                return
+            }
+            subscriber.putNext(())
+        }
+        subscriber.putNext(())
+        return ActionDisposable {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+    let signal = combineLatest(
+        context.sharedContext.presentationData,
+        historyChanges
+        |> mapToSignal { _ in
+            context.account.postbox.transaction { transaction in"""
+if history_signal_start in u:
+    u = u.replace(history_signal_start, history_signal_start_new, 1)
+elif "let historyChanges: Signal<Void, NoError> = Signal" not in u:
+    raise SystemExit("History screen Postbox signal anchor not found")
+
+history_signal_end = """            }
+        }
+    )
+    |> deliverOnMainQueue
+    |> map { presentationData, messages -> (ItemListControllerState, (ItemListNodeState, Any)) in"""
+history_signal_end_new = """            }
+        }
+        }
+    )
+    |> deliverOnMainQueue
+    |> map { presentationData, messages -> (ItemListControllerState, (ItemListNodeState, Any)) in"""
+if history_signal_end in u:
+    u = u.replace(history_signal_end, history_signal_end_new, 1)
+elif "historyChanges" not in u:
+    raise SystemExit("Could not close History live-update signal")
+
+if "AyuGramPostboxHistoryStore.didChangeNotification" not in u or "historyChanges" not in u:
+    raise SystemExit("History list is not wired to live Postbox updates")
+
 if "let senderName: String" not in u:
     u = u.replace(
         "    let displayKind: String\n\n    init(presentationData:",
@@ -1430,7 +1886,7 @@ item_match = re.search(r'(?m)^(\s*)entries\.append\(\.item\(message\.fakeID, (.+
 if item_match:
     indent = item_match.group(1)
     sender = indent + 'let sender = message.fromName ?? ""\n'
-    meta = indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
+    meta = indent + 'let meta = deletionDate.map { "Sent: \\(date)\\nDeleted: \\($0)" } ?? date\n'
     if "case message(Int64, AyuMessage" in u:
         replacement = sender + meta + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
     else:
@@ -1443,7 +1899,7 @@ else:
         indent = entry_match.group(1)
         replacement = (
             indent + 'let sender = message.fromName ?? ""\n'
-            + indent + 'let meta = deletionDate.map { "\\(date) • Deleted \\($0)" } ?? date\n'
+            + indent + 'let meta = deletionDate.map { "Sent: \\(date)\\nDeleted: \\($0)" } ?? date\n'
             + indent + 'entries.append(.message(message.fakeID, message, body, meta, kind, sender))'
         )
         u = u[:entry_match.start()] + replacement + u[entry_match.end():]
@@ -1482,7 +1938,7 @@ u = re.sub(
 )
 u = re.sub(
     r'self\.timeLabel\.frame = CGRect\([^\n]+\)',
-    'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 20.0)',
+    'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 32.0)',
     u,
     count=1,
 )
@@ -1494,6 +1950,10 @@ if 'body = "Media unavailable (' not in u:
     raise SystemExit("History needs a fallback if the archived media file is missing")
 if "item.displayText.isEmpty && hasMedia ? 0.0" not in u:
     raise SystemExit("Empty text rows should collapse the body area when media preview is present")
+if "let estimateRect = (self.displayText as NSString).boundingRect(" not in u:
+    raise SystemExit("History row height estimate is not based on each message's text")
+if "self.timeLabel.numberOfLines = 2" not in u or "+ 36.0 + 8.0" not in u:
+    raise SystemExit("History row height must account for sent/deleted timestamp footer")
 
 # Keep History ordered like a conversation: oldest at the top, newest at the bottom,
 # then position the initial viewport on the newest captured message.
@@ -1526,7 +1986,9 @@ new_list_state = """        let historyEntries = ayuHistoryEntries(messages, set
         let listState = ItemListNodeState(
             presentationData: ItemListPresentationData(presentationData),
             entries: historyEntries,
-            style: .blocks,
+            // The conversation view should use a continuous plain canvas,
+            // not Telegram's grouped Settings/blocks list background.
+            style: .plain,
             initialScrollToItem: initialScrollToItem,
             animateChanges: false
         )"""
@@ -1536,6 +1998,10 @@ elif "initialScrollToItem: initialScrollToItem" not in u:
     raise SystemExit("Could not add initial scroll-to-latest for History")
 if "position: .bottom(0.0)" not in u or "historyEntries.count - 1" not in u:
     raise SystemExit("History initial scroll-to-latest contract missing")
+if "style: .plain," not in u:
+    raise SystemExit("History conversation must use a plain canvas rather than a Settings blocks list")
+if "theme.chat.message.incoming.bubble" not in history_preview_helper and "messageTheme.bubble.withoutWallpaper.fill.first" not in history_preview_helper:
+    raise SystemExit("History must use Telegram-native chat bubble colors")
 if "let outgoing = item.message.fromID == item.message.userID" not in u or "let bubbleX = outgoing ?" not in u:
     raise SystemExit("Incoming/outgoing message alignment missing")
 
@@ -1581,6 +2047,11 @@ if "public let fromName: String?" not in message_text or "public let deletedAt: 
     raise SystemExit("History sender/deletion metadata model missing")
 if "senderNames: [Int32: String]" not in capture.read_text():
     raise SystemExit("Deleted capture sender-name contract missing")
+store_validation = store.read_text()
+if "fromName: snapshot.fromName," not in store_validation:
+    raise SystemExit("Production Postbox History storage drops the sender name")
+if "deletedAt: snapshot.deletedAt ?? (deleted ? Int32(Date().timeIntervalSince1970) : nil)" not in store_validation:
+    raise SystemExit("Production Postbox History storage drops the actual deletion time")
 if context_menu_text.count("AyuGram Save") != 1:
     raise SystemExit("Manual AyuGram Save action must exist exactly once")
 save_tail = context_menu_text.split("AyuGram Save", 1)[1].split("})))", 1)[0]
@@ -1588,17 +2059,21 @@ if "isCopyProtected()" in save_tail or "containsSecretMedia" in save_tail:
     raise SystemExit("Manual AyuGram Save must not reuse Telegram copy-protection gate")
 if 'let bubbleWidth = min(max(params.width * 0.80' not in u:
     raise SystemExit("Telegram-style narrow message bubble layout missing")
-if 'self.senderLabel.textColor = UIColor { trait in' not in u or 'User \\(item.message.fromID)' not in u:
-    raise SystemExit("Telegram-style sender styling or fallback missing")
+if 'self.senderLabel.textColor = messageTheme.accentTextColor' not in u or 'User \\(item.message.fromID)' not in u:
+    raise SystemExit("Telegram-native sender styling or fallback missing")
 if 'AVAssetImageGenerator(asset: asset)' not in u or 'generateCGImagesAsynchronously' not in u:
     raise SystemExit("Video thumbnail preview implementation missing")
 if 'Unknown sender' in u:
     raise SystemExit("History must not fall back to the vague Unknown sender label")
-if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0' not in u:
+if 'self.timeLabel.frame = CGRect(x: 14.0, y: footerY, width: bubbleWidth - 62.0, height: 32.0)' not in u:
     raise SystemExit("History message/deletion timestamps would be clipped")
+if "self.timeLabel.numberOfLines = 2" not in u:
+    raise SystemExit("History list must show sent and deleted timestamps on two lines")
 
-if 'Deleted \\($0)' not in u:
+if 'Deleted: \\($0)' not in u and 'Deleted \\($0)' not in u:
     raise SystemExit("History deleted-at presentation missing")
+if "transaction.getPeer(PeerId(message.fromID))" not in u:
+    raise SystemExit("History must resolve missing sender names from Telegram's Postbox peer cache")
 
 # Automatic History must archive media privately and persist message/text history in Postbox.
 # It must never write text into the visible Saved files unless the user explicitly taps Save.

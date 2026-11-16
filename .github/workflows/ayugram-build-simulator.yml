@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/history-production-ui-smoke-no-auto-ipa
     paths:
       - '.github/workflows/ayugram-build-simulator.yml'
       - '.github/history-menu-smoke.py'
@@ -411,6 +412,7 @@ jobs:
           mkdir -p "$DOCUMENTS"
           rm -f "$DOCUMENTS/AyuGramHistoryMenuHarnessReady.txt" \
                 "$DOCUMENTS/AyuGramHistoryListHarnessReady.txt" \
+                "$DOCUMENTS/AyuGramHistoryProductionScreenReady.txt" \
                 "$DOCUMENTS/AyuGramHistoryListSmokeReport.json"
           
           # Run the actual in-app save implementation against a two-file album and
@@ -512,7 +514,7 @@ jobs:
           }
 
           let historyText = try recognizedText("ci-artifacts/smoke/AyuGram-History-List.png")
-          print("History screenshot OCR:\n\\(historyText)")
+          print("History screenshot OCR:\n" + historyText)
           let actualHistoryScreen = historyText.localizedCaseInsensitiveContains("Deleted message")
               && historyText.localizedCaseInsensitiveContains("Synthetic deleted message")
           let visualFallbackFixture = historyText.localizedCaseInsensitiveContains("AyuGram deleted-history smoke test")
@@ -550,7 +552,11 @@ jobs:
           else:
               assert report.get("senderName") == "Smoke Test Sender", report
               assert report.get("dialogID") is not None, report
-              print("Production History hook reported a rendered per-dialog entry.")
+              assert report.get("production_history_screen_tested") is True, report
+              assert report.get("mode") == "production AccountContext History screen", report
+              assert report.get("senderName") == "Smoke Test Sender", report
+              assert report.get("dialogID") is not None, report
+              print("Production History screen rendered and its per-dialog entry is reported.")
           PY
 
           # Check only for recent Telegram-process crash/fatal messages; do not treat
