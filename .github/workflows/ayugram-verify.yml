@@ -74,7 +74,7 @@ jobs:
               i = 0
               while i < len(lines):
                   if lines[i].startswith("@@ "):
-                      hm = re.match(r"^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@", lines[i])
+                      hm = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", lines[i])
                       if not hm:
                           raise SystemExit(f"Bad hunk header in {target}: {lines[i]!r}")
                       old_start = int(hm.group(1))
@@ -100,7 +100,7 @@ jobs:
                       if line.startswith("+") or line.startswith(" "):
                           new_lines.append(line[1:])
                   target.parent.mkdir(parents=True, exist_ok=True)
-                  target.write_text("\\n".join(new_lines) + ("\\n" if new_lines else ""), encoding="utf-8")
+                  target.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
                   applied.append(str(target))
                   continue
 
