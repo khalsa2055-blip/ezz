@@ -134,7 +134,7 @@ jobs:
                       current[insert_at:insert_at] = new_lines
                       cursor = insert_at + len(new_lines)
 
-              target.write_text("\\n".join(current) + ("\\n" if current else ""), encoding="utf-8")
+              target.write_text("\n".join(current) + ("\n" if current else ""), encoding="utf-8")
               applied.append(str(target))
 
           print("Applied", len(applied), "diff sections")
