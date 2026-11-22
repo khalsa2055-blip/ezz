@@ -1516,6 +1516,43 @@ diff --git a/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.s
  import MtProtoKit
  import EncryptionProvider
 +import AyuGramIOS
+@@ -4442,2 +4442,35 @@
+             case let .DeleteMessagesWithGlobalIds(ids):
++                let messageIds = transaction.messageIdsForGlobalIds(ids)
++                let messages = messageIds.compactMap { transaction.getMessage($0) }
++                var mediaCaptures: [AyuMessageMediaCapture] = []
++                for message in messages {
++                    guard !message.isCopyProtected(), !message.containsSecretMedia else {
++                        continue
++                    }
++                    var resources: [AyuMediaResourceInfo] = []
++                    for media in message.effectiveMedia {
++                        if let image = media as? TelegramMediaImage {
++                            for representation in image.representations.sorted(by: {
++                                Int64($0.dimensions.width) * Int64($0.dimensions.height)
++                                    > Int64($1.dimensions.width) * Int64($1.dimensions.height)
++                            }) {
++                                resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
++                            }
++                        } else if let file = media as? TelegramMediaFile {
++                            resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
++                        }
++                    }
++                    if !resources.isEmpty {
++                        var seen: Set<String> = []
++                        resources = resources.filter { seen.insert($0.id).inserted }
++                        mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))
++                    }
++                }
++                AyuGramCaptureService.captureDeleted(
++                    transaction: transaction,
++                    mediaBox: mediaBox,
++                    messages: messages,
++                    mediaCaptures: mediaCaptures,
++                    accountID: accountPeerId.toInt64()
++                )
+                 var resourceIds: [MediaResourceId] = []
+
 @@ -4451,7 +4451,7 @@
              case let .DeleteMessages(ids):
                  _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, manualAddMessageThreadStatsDifference: { id, add, remove in
@@ -1565,42 +1602,6 @@ diff --git a/submodules/TelegramCore/Sources/State/AccountStateManagementUtils.s
                  transaction.updateMessage(id, update: { previousMessage in
                      var updatedFlags = message.flags
                      var updatedLocalTags = message.localTags
-@@ -4442,2 +4442,35 @@
-             case let .DeleteMessagesWithGlobalIds(ids):
-+                let messageIds = transaction.messageIdsForGlobalIds(ids)
-+                let messages = messageIds.compactMap { transaction.getMessage($0) }
-+                var mediaCaptures: [AyuMessageMediaCapture] = []
-+                for message in messages {
-+                    guard !message.isCopyProtected(), !message.containsSecretMedia else {
-+                        continue
-+                    }
-+                    var resources: [AyuMediaResourceInfo] = []
-+                    for media in message.effectiveMedia {
-+                        if let image = media as? TelegramMediaImage {
-+                            for representation in image.representations.sorted(by: {
-+                                Int64($0.dimensions.width) * Int64($0.dimensions.height)
-+                                    > Int64($1.dimensions.width) * Int64($1.dimensions.height)
-+                            }) {
-+                                resources.append(AyuMediaResourceInfo(id: representation.resource.id.stringRepresentation, mimeType: "image/jpeg"))
-+                            }
-+                        } else if let file = media as? TelegramMediaFile {
-+                            resources.append(AyuMediaResourceInfo(id: file.resource.id.stringRepresentation, mimeType: file.mimeType))
-+                        }
-+                    }
-+                    if !resources.isEmpty {
-+                        var seen: Set<String> = []
-+                        resources = resources.filter { seen.insert($0.id).inserted }
-+                        mediaCaptures.append(AyuMessageMediaCapture(messageID: message.id.id, resources: resources))
-+                    }
-+                }
-+                AyuGramCaptureService.captureDeleted(
-+                    transaction: transaction,
-+                    mediaBox: mediaBox,
-+                    messages: messages,
-+                    mediaCaptures: mediaCaptures,
-+                    accountID: accountPeerId.toInt64()
-+                )
-                 var resourceIds: [MediaResourceId] = []
 
 diff --git a/submodules/TelegramCore/Sources/State/AccountTaskManager.swift b/submodules/TelegramCore/Sources/State/AccountTaskManager.swift
 --- a/submodules/TelegramCore/Sources/State/AccountTaskManager.swift
