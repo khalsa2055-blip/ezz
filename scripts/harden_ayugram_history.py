@@ -286,6 +286,29 @@ if "ayuAccountID: accountPeerId.toInt64()" not in delete_event_block:
     raise SystemExit("Automatic History is not enabled for server-delivered deleted-message updates")
 print("Verified automatic History receives account ID on Telegram's server-delivered DeleteMessages path.")
 
+# Basic groups and private chats deliver deletions as global message IDs instead of
+# full MessageIds. Resolve the still-stored messages before Postbox removes them,
+# then send them through the same capture service used by channel/supergroup deletes.
+global_case_marker = "case let .DeleteMessagesWithGlobalIds(ids):"
+if global_case_marker not in state_utils_text:
+    raise SystemExit("Global-ID DeleteMessages handler not found")
+global_delete_block = state_utils_text.split(global_case_marker, 1)[1].split("case let .DeleteMessages(ids):", 1)[0]
+global_capture_markers = [
+    "transaction.messageIdsForGlobalIds(ids)",
+    "let messages = messageIds.compactMap { transaction.getMessage($0) }",
+    "AyuGramCaptureService.captureDeleted(",
+    "accountID: accountPeerId.toInt64()",
+    "transaction.deleteMessagesWithGlobalIds(ids, forEachMedia:",
+]
+for required in global_capture_markers:
+    if required not in global_delete_block:
+        raise SystemExit(f"Global-ID deletion capture missing: {required}")
+if global_delete_block.index("AyuGramCaptureService.captureDeleted(") > global_delete_block.index("transaction.deleteMessagesWithGlobalIds(ids, forEachMedia:"):
+    raise SystemExit("Global-ID messages must be captured before Postbox deletes them")
+if "!message.isCopyProtected(), !message.containsSecretMedia" not in global_delete_block:
+    raise SystemExit("Global-ID capture must preserve copy-protection and secret-media exclusions")
+print("Verified both incoming deletion paths: channel/supergroup MessageIds and basic-group/private global IDs.")
+
 for required in [
     "AyuGram Save",
     "AyuGram Transfer to Saved Messages",
